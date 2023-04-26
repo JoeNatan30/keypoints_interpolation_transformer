@@ -27,6 +27,7 @@ os.environ["WANDB_API_KEY"] = "8b69e5a1943f75b652c694fbe3875c3216e3fbe6"
 connections = np.moveaxis(np.array(get_edges_index('54')), 0, 1)
 
 
+
 def lr_lambda(current_step, optim):
     
     #if current_step <= 50:
@@ -119,15 +120,36 @@ def eval_epoch(model, dataloader, criterion, body_parts_class, device):
             wandb.log({"examples_validation epoch": images})
 
             # send Test
-            sos = torch.ones(1, inputs.shape[1], inputs.shape[2]).to(device)
-            
-            tgt_mask = model.get_tgt_mask(1).to(device)
-            test_output = model(inputs, sos, tgt_mask=tgt_mask)
+            _, Kp_size, coord_size = inputs.shape
 
-            trueOut_images = prepare_keypoints_image(test_output[0], body_parts_class, connections, "Test")
-            for _rel_pos in range(1, len(trueOut_images)):
-                trueOut_images = np.concatenate((trueOut_images, prepare_keypoints_image(trueOut_images[_rel_pos], body_parts_class, connections)), axis=1)
-            images = wandb.Image(trueOut_images, caption="Test Output")
+            #          Y_recursive starts as <SOS>
+            y_recursive = torch.ones(1, inputs.shape[1], inputs.shape[2]).to(device) # SOS
+            #          We save the first (empty) frame
+            test_images = prepare_keypoints_image(y_recursive[0], body_parts_class, connections, "Test")
+ 
+            eos = torch.zeros(1, Kp_size, coord_size-1).to(device)  # tensor de mitad ceros y mitad unos
+            eos = torch.cat((eos,y_recursive[:,:,-1:].clone()), dim=2)
+
+            for _rel_pos in range(1, len(inputs)+5):
+
+                tgt_mask = model.get_tgt_mask(len(y_recursive)).to(device)
+
+                pred = model(inputs, y_recursive, tgt_mask=tgt_mask)
+
+                #append keypoints
+                if len(pred) == 1:
+                    y_recursive = torch.cat((y_recursive, pred), dim=0)
+                else:
+                    y_recursive = torch.cat((y_recursive, pred[-1:]), dim=0)
+
+                #append image
+                test_images = np.concatenate((test_images, prepare_keypoints_image(y_recursive[_rel_pos], body_parts_class, connections)), axis=1)
+
+                next_item_check = pred == eos
+                if next_item_check.all():
+                    break
+
+            images = wandb.Image(test_images, caption="Test Output")
             wandb.log({"examples of test": images})
 
     return running_loss/data_length

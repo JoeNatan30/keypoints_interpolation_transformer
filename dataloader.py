@@ -467,6 +467,10 @@ class LSP_Dataset(Dataset):
         self.augmentations_prob = augmentations_prob
         self.normalize = normalize
 
+        # Errase repeated
+
+        # CREATE CHUNKS
+
     def __getitem__(self, idx):
         """
         Allocates, potentially transforms and returns the item at the desired index.
