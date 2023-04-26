@@ -309,31 +309,52 @@ def replace_points(data, timestep, hand, wrist):
 
     return data
 
-def put_missing_values(data, body_parts_class):
+def put_missing_values(video, body_parts_class):
 
     pose, _, leftHand, rightHand = body_parts_class.body_part_points()
     body_section_dict = body_parts_class.body_dict()
 
-    missing_amount = random.randrange(1,data.shape[0])
-    missing_samples = random.choices(range(data.shape[0]), k=missing_amount)
+    missing_amount = random.randrange(1,video.shape[0])
+    missing_samples = random.choices(range(video.shape[0]), k=missing_amount)
 
     for r, pos in enumerate(missing_samples):
         #if r == 0:
-        #    prepare_keypoints_image(data[pos][:,:].numpy(),"omae")
+        #    prepare_keypoints_image(video[pos][:,:].numpy(),"omae")
 
         missing_hand_type = random.randrange(3)
 
         if missing_hand_type == 0:
-            data = replace_points(data, pos, leftHand, body_section_dict['pose_left_wrist'])
+            video = replace_points(video, pos, leftHand, body_section_dict['pose_left_wrist'])
         elif missing_hand_type == 1:
-            data = replace_points(data, pos, rightHand, body_section_dict['pose_right_wrist'])
+            video = replace_points(video, pos, rightHand, body_section_dict['pose_right_wrist'])
         else:
-            data = replace_points(data, pos, leftHand, body_section_dict['pose_left_wrist'])
-            data = replace_points(data, pos, rightHand, body_section_dict['pose_right_wrist'])
+            video = replace_points(video, pos, leftHand, body_section_dict['pose_left_wrist'])
+            video = replace_points(video, pos, rightHand, body_section_dict['pose_right_wrist'])
         #if r == 0:
-        #    prepare_keypoints_image(data[pos][:,:].numpy(),"nani")
+        #    prepare_keypoints_image(video[pos][:,:].numpy(),"nani")
 
-    return data
+    return video, None
+
+def put_missing_frames(video, hidden_dim):
+
+    # Numbers of frames to create missing landmarks
+    missing_amount = random.randrange(1, video.shape[0])
+
+    # chose randomly the number of frames you desire
+    missing_samples = random.choices(range(video.shape[0]), k=missing_amount)
+
+    if hidden_dim == None:
+        mask = torch.zeros([video.shape[0]])
+    else:
+        mask = torch.zeros([video.shape[0]])
+
+    for r, pos in enumerate(missing_samples):
+
+        video[pos] = torch.zeros(video[pos].shape)
+        mask[pos] = 1
+
+    return video, mask
+
 
 def filter_bad_videos(video, body_section_dict):
 
@@ -378,14 +399,28 @@ def filter_videos(data, body_parts_class):
     print(f"The filer deletes {count} videos")
     return data
 
-def add_start_eof(video):
+def add_sos_eos(video, mask=None):
 
-    unos = torch.ones(1, 54, 2)  # tensor de unos
-    ceros = torch.zeros(1, 54, 2)  # tensor de ceros
+    _, Kp_size, coord_size = video.shape
+    sos = torch.ones(1, Kp_size, coord_size)  # tensor de unos
+    
+    eos = torch.zeros(1, Kp_size, coord_size-1)  # tensor de mitad ceros y mitad unos
+    eos = torch.cat((eos,sos[:,:,-1:].clone()), dim=2)
+    
+    video = torch.cat([sos, video, eos], dim=0)
 
-    video = torch.cat([unos, video, ceros], dim=0)
+    if mask!=None:
+        mask = torch.cat([torch.zeros(1), mask, torch.zeros(1)], dim=0)  
+        mask = mask.unsqueeze(0)
 
-    return video
+    return video, mask
+
+def delete_last_sequence(video, mask):
+
+    video = video[:-1,:,:]
+    mask = mask[:,:-1]
+
+    return video, mask
 
 class LSP_Dataset(Dataset):
     """Advanced object representation of the HPOES dataset for loading hand joints landmarks utilizing the Torch's
@@ -395,7 +430,8 @@ class LSP_Dataset(Dataset):
 
     def __init__(self, dataset_filename: str,keypoints_model:str,  transform=None, have_aumentation=True,
                  augmentations_prob=0.5, normalize=False,landmarks_ref= 'Mapeo landmarks librerias.csv',
-                 keypoints_number = 54):
+                 keypoints_number = 54,
+                 hidden_dim=None):
         """
         Initiates the HPOESDataset with the pre-loaded data from the h5 file.
 
@@ -422,6 +458,8 @@ class LSP_Dataset(Dataset):
 
         self.data = video_dataset
         self.transform = transform
+
+        self.hidden_dim = hidden_dim
         
         self.have_aumentation = have_aumentation
         print(keypoint_body_part_index, body_section_dict)
@@ -459,12 +497,20 @@ class LSP_Dataset(Dataset):
         if self.transform:
             depth_map = self.transform(depth_map)
 
-        # TODO HERE YOU HAVE TO MODIFY THE INPUT (ADD MISSING VALUES)
-        depth_map_missing = put_missing_values(depth_map.clone(), self.body_parts_class)
+        # Missing landmarks
+        #depth_map_missing, mask = put_missing_values(depth_map.clone(), self.body_parts_class)
+        
+        # Missing frames
+        depth_map_missing, mask = put_missing_frames(depth_map.clone(), self.hidden_dim)
 
-        depth_map = add_start_eof(depth_map)
+        # add SOS in the data and mask
+        depth_map_missing, mask = add_sos_eos(depth_map_missing, mask)
+        depth_map, _ = add_sos_eos(depth_map)
 
-        return depth_map_missing, depth_map
+        # shift to errase the last keypoint group
+        depth_map_missing, mask = delete_last_sequence(depth_map_missing, mask)
+
+        return depth_map_missing, depth_map, mask
 
     def __len__(self):
         return len(self.data)

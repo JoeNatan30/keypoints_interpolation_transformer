@@ -48,18 +48,24 @@ def train_epoch(model, dataloader, criterion, optimizer, device):
     data_length = len(dataloader)
 
     for i, data in enumerate(dataloader):
-        inputs, trueOut = data
+        inputs, trueOut, mask = data
 
         inputs = inputs.squeeze(0).to(device).float()
         trueOut = trueOut.squeeze(0).to(device).float()
 
-        optimizer.zero_grad()
-        outputs = model(inputs, trueOut)
+        if mask!=None:
+            mask = mask.squeeze(0).to(device).float()
+        
+        tgt_mask = model.get_tgt_mask(inputs.shape[0]).to(device)
+        outputs = model(inputs, trueOut[:-1,:,:], mask, tgt_mask)
 
-        loss = criterion(outputs[:-1,:,:], trueOut[1:-1,:,:])
+        loss = criterion(outputs, trueOut[1:,:,:])
         loss = loss.float()
+
+        optimizer.zero_grad()
         loss.backward()
         optimizer.step()
+
         running_loss += loss
 
     return running_loss/data_length
@@ -73,41 +79,56 @@ def eval_epoch(model, dataloader, criterion, body_parts_class, device):
 
     for i, data in enumerate(dataloader):
 
-        inputs, trueOut = data
+        inputs, trueOut, mask = data
 
         inputs = inputs.squeeze(0).to(device).float()
         trueOut = trueOut.squeeze(0).to(device).float()
 
-        unos = torch.ones(1, 54, 2).to(device)
-        inputs = torch.cat([unos, inputs], dim=0)
 
-        outputs = model(inputs)
+        tgt_mask = model.get_tgt_mask(inputs.shape[0]).to(device)
+        outputs = model(inputs, trueOut[:-1,:,:], tgt_mask=tgt_mask)
 
-        loss = criterion(outputs[:-1,:,:], trueOut[1:-1,:,:])
+        loss = criterion(outputs, trueOut[1:,:,:])
         loss = loss.float()
         running_loss += loss
 
+        # Print in WandB
         if i == 1:
-            
-            trueOut = trueOut[1:-1,:,:]
-            outputs = outputs[:-1,:,:]
-            inputs = inputs[1:,:,:]
+            # send validation output
+            trueOut = trueOut[1:,:,:]
+            outputs = outputs[:,:,:]
+            inputs = inputs[:,:,:]
 
+            # add input
             input_images = prepare_keypoints_image(inputs[0], body_parts_class, connections, "input")
             for _rel_pos in range(1, len(inputs)):
                 input_images = np.concatenate((input_images, prepare_keypoints_image(inputs[_rel_pos], body_parts_class, connections)), axis=1)
 
-            trueOut_images = prepare_keypoints_image(trueOut[0], body_parts_class, connections, "trueOut")
-            for _rel_pos in range(1, len(trueOut)):
-                trueOut_images = np.concatenate((trueOut_images, prepare_keypoints_image(trueOut[_rel_pos], body_parts_class, connections)), axis=1)
-
+            # add output
             output_images = prepare_keypoints_image(outputs[0], body_parts_class, connections, "output")
             for _rel_pos in range(1, len(outputs)):
                 output_images = np.concatenate((output_images, prepare_keypoints_image(outputs[_rel_pos], body_parts_class, connections)), axis=1)
         
-            output = np.concatenate((trueOut_images, input_images, output_images), axis=0)
-            images = wandb.Image(output, caption="Top: Output, Bottom: Input")
+            # add trueOut
+            trueOut_images = prepare_keypoints_image(trueOut[0], body_parts_class, connections, "trueOut")
+            for _rel_pos in range(1, len(trueOut)):
+                trueOut_images = np.concatenate((trueOut_images, prepare_keypoints_image(trueOut[_rel_pos], body_parts_class, connections)), axis=1)
+
+            output = np.concatenate((input_images, output_images, trueOut_images), axis=0)
+            images = wandb.Image(output, caption="Validation")
             wandb.log({"examples_validation epoch": images})
+
+            # send Test
+            sos = torch.ones(1, inputs.shape[1], inputs.shape[2]).to(device)
+            
+            tgt_mask = model.get_tgt_mask(1).to(device)
+            test_output = model(inputs, sos, tgt_mask=tgt_mask)
+
+            trueOut_images = prepare_keypoints_image(test_output[0], body_parts_class, connections, "Test")
+            for _rel_pos in range(1, len(trueOut_images)):
+                trueOut_images = np.concatenate((trueOut_images, prepare_keypoints_image(trueOut_images[_rel_pos], body_parts_class, connections)), axis=1)
+            images = wandb.Image(trueOut_images, caption="Test Output")
+            wandb.log({"examples of test": images})
 
     return running_loss/data_length
 
@@ -123,7 +144,8 @@ def train(args):
     #transform = transforms.Compose([GaussianNoise(args.gaussian_mean, args.gaussian_std)])
     train_set = dataloader.LSP_Dataset(args.training_set_path, 
                                        have_aumentation=True, 
-                                       keypoints_model='mediapipe')
+                                       keypoints_model='mediapipe',
+                                       hidden_dim = 128)
 
     body_parts_class = train_set.body_parts_class
 

@@ -128,20 +128,21 @@ class KeypointCompleter(nn.Module):
         # FINAL LAYER (LINEAR)
         self.fc = nn.Linear(hidden_dim, input_size)
 
-    def forward(self, inputs, trueOut=None):
+    def forward(self, inputs, trueInput=None, mask=None, tgt_mask=None):
 
         h = torch.unsqueeze(inputs.flatten(start_dim=1), 1).float()
         h = self.embedding(h)
         h = self.positional_encoder(h)
 
-        if trueOut == None:
-            h = self.transformer(h[1:,:,:], h).transpose(0, 1)
-        else:
-            o = torch.unsqueeze(trueOut[:-1,:,:].flatten(start_dim=1), 1).float()
-            o = self.embedding(o)
-            o = self.positional_encoder(o)
+        o = torch.unsqueeze(trueInput.flatten(start_dim=1), 1).float()
+        o = self.embedding(o)
+        o = self.positional_encoder(o)
 
-            h = self.transformer(h, o).transpose(0, 1)
+        if mask==None:
+            h = self.transformer(h, o, tgt_mask=tgt_mask).transpose(0, 1)
+        else:
+            # the reason of use of src_key_padding_mask is here: https://discuss.pytorch.org/t/transformer-difference-between-src-mask-and-src-key-padding-mask/84024
+            h = self.transformer(h, o, src_key_padding_mask=mask, tgt_mask=tgt_mask).transpose(0, 1)
            
         decoded = self.fc(h)
 
@@ -149,3 +150,19 @@ class KeypointCompleter(nn.Module):
         decoded = decoded.permute(0, 2, 1).view(-1, 54, 2)
 
         return decoded
+
+    def get_tgt_mask(self, size) -> torch.tensor:
+        # Generates a squeare matrix where the each row allows one word more to be seen
+        mask = torch.tril(torch.ones(size, size) == 1) # Lower triangular matrix
+        mask = mask.float()
+        mask = mask.masked_fill(mask == 0, float('-inf')) # Convert zeros to -inf
+        mask = mask.masked_fill(mask == 1, float(0.0)) # Convert ones to 0
+        
+        # EX for size=5:
+        # [[0., -inf, -inf, -inf, -inf],
+        #  [0.,   0., -inf, -inf, -inf],
+        #  [0.,   0.,   0., -inf, -inf],
+        #  [0.,   0.,   0.,   0., -inf],
+        #  [0.,   0.,   0.,   0.,   0.]]
+        
+        return mask
