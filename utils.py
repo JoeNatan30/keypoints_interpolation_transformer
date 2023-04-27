@@ -21,7 +21,7 @@ def prepare_keypoints_image(keypoints,tag):
 
     return img
 
-def prepare_keypoints_image(keypoints, body_parts_class, connections=[], addText=None):
+def prepare_keypoints_image(keypoints, connections=[], pos_rel='', addText=None):
     # this vaariable is feeded in draw points process and used in the draw joint lines proceess
     part_line = {}
     part_type = {}
@@ -32,15 +32,22 @@ def prepare_keypoints_image(keypoints, body_parts_class, connections=[], addText
     #imgLH = np.zeros((256, 256, 3), np.uint8)
     #imgRH = np.zeros((256, 256, 3), np.uint8)
 
+    # To print numbers
+    fontScale = 0.5
+    color = (0, 255, 0)
+    thickness = 2
+
+    org = (220, 20)
+    img = cv2.putText(img, str(pos_rel), org, cv2.FONT_HERSHEY_SIMPLEX, 
+                          fontScale, color, thickness, cv2.LINE_AA)
+
+    # To print the text
     if addText:
         org = (20, 20)
-        fontScale = 0.5
-        color = (0, 255, 0)
-        thickness = 2
         img = cv2.putText(img, addText, org, cv2.FONT_HERSHEY_SIMPLEX, 
                           fontScale, color, thickness, cv2.LINE_AA)
 
-    pose, face, leftHand, rightHand = body_parts_class.body_part_points()
+    #pose, face, leftHand, rightHand = body_parts_class.body_part_points()
 
     for n, coords in enumerate(keypoints):
 

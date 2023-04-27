@@ -101,19 +101,19 @@ def eval_epoch(model, dataloader, criterion, body_parts_class, device):
             inputs = inputs[:,:,:]
 
             # add input
-            input_images = prepare_keypoints_image(inputs[0], body_parts_class, connections, "input")
+            input_images = prepare_keypoints_image(inputs[0], connections, -1, "input")
             for _rel_pos in range(1, len(inputs)):
-                input_images = np.concatenate((input_images, prepare_keypoints_image(inputs[_rel_pos], body_parts_class, connections)), axis=1)
+                input_images = np.concatenate((input_images, prepare_keypoints_image(inputs[_rel_pos], connections, _rel_pos-1)), axis=1)
 
             # add output
-            output_images = prepare_keypoints_image(outputs[0], body_parts_class, connections, "output")
+            output_images = prepare_keypoints_image(outputs[0], connections, 0, "prediction")
             for _rel_pos in range(1, len(outputs)):
-                output_images = np.concatenate((output_images, prepare_keypoints_image(outputs[_rel_pos], body_parts_class, connections)), axis=1)
+                output_images = np.concatenate((output_images, prepare_keypoints_image(outputs[_rel_pos], connections, _rel_pos)), axis=1)
         
             # add trueOut
-            trueOut_images = prepare_keypoints_image(trueOut[0], body_parts_class, connections, "trueOut")
+            trueOut_images = prepare_keypoints_image(trueOut[0], connections, 0, "trueOut")
             for _rel_pos in range(1, len(trueOut)):
-                trueOut_images = np.concatenate((trueOut_images, prepare_keypoints_image(trueOut[_rel_pos], body_parts_class, connections)), axis=1)
+                trueOut_images = np.concatenate((trueOut_images, prepare_keypoints_image(trueOut[_rel_pos],  connections, _rel_pos)), axis=1)
 
             output = np.concatenate((input_images, output_images, trueOut_images), axis=0)
             images = wandb.Image(output, caption="Validation")
@@ -125,7 +125,7 @@ def eval_epoch(model, dataloader, criterion, body_parts_class, device):
             #          Y_recursive starts as <SOS>
             y_recursive = torch.ones(1, inputs.shape[1], inputs.shape[2]).to(device) # SOS
             #          We save the first (empty) frame
-            test_images = prepare_keypoints_image(y_recursive[0], body_parts_class, connections, "Test")
+            test_images = prepare_keypoints_image(y_recursive[0], connections, -1, "Test")
  
             eos = torch.zeros(1, Kp_size, coord_size-1).to(device)  # tensor de mitad ceros y mitad unos
             eos = torch.cat((eos,y_recursive[:,:,-1:].clone()), dim=2)
@@ -143,7 +143,7 @@ def eval_epoch(model, dataloader, criterion, body_parts_class, device):
                     y_recursive = torch.cat((y_recursive, pred[-1:]), dim=0)
 
                 #append image
-                test_images = np.concatenate((test_images, prepare_keypoints_image(y_recursive[_rel_pos], body_parts_class, connections)), axis=1)
+                test_images = np.concatenate((test_images, prepare_keypoints_image(y_recursive[_rel_pos], connections, _rel_pos-1)), axis=1)
 
                 next_item_check = pred == eos
                 if next_item_check.all():

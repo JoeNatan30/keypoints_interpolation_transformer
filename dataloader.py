@@ -265,7 +265,6 @@ def get_dataset_from_hdf5(path,keypoints_model, landmarks_ref, keypoints_number)
 
     print('Reading dataset .. ')
     data = get_data_from_h5(path)
-    #torch.Size([5, 54, 2])
 
     print('Total size dataset : ',len(data.keys()))
 
@@ -361,10 +360,10 @@ def filter_bad_videos(video, body_section_dict):
     is_bad = False
 
     # More than # value (because we delete about 12 frames 6 at the beginning ant 6 at final)
-    if len(video) < 15:
+    if len(video) < 20:
         is_bad = True
     else:
-        video = video[6:-6,:,:]
+        video = video[8:-8,:,:]
 
     for pos in range(len(video)):
         if is_bad:
@@ -422,6 +421,33 @@ def delete_last_sequence(video, mask):
 
     return video, mask
 
+def create_chunks(video_list, cut_size=20):
+
+    new_dataset = []
+
+    for video_ind in range(len(video_list)):
+
+        video = video_list[video_ind]
+
+        video_len = len(video)
+
+        times = video_len // cut_size
+        rest = video_len % cut_size
+
+        if times == 0:
+            new_dataset.append(video)
+            continue
+
+        for chunk in range(times):
+            new_dataset.append(video[cut_size*chunk:cut_size*(chunk+1),:,:])
+
+        if rest > 0:
+            new_dataset.append(video[-cut_size:,:,:])
+
+    new_dataset = np.array(new_dataset)
+    return new_dataset
+
+
 class LSP_Dataset(Dataset):
     """Advanced object representation of the HPOES dataset for loading hand joints landmarks utilizing the Torch's
     built-in Dataset properties"""
@@ -456,7 +482,7 @@ class LSP_Dataset(Dataset):
 
         viedo_dataset = filter_videos(video_dataset, self.body_parts_class)
 
-        self.data = video_dataset
+        
         self.transform = transform
 
         self.hidden_dim = hidden_dim
@@ -467,9 +493,10 @@ class LSP_Dataset(Dataset):
         self.augmentations_prob = augmentations_prob
         self.normalize = normalize
 
-        # Errase repeated
-
         # CREATE CHUNKS
+        viedo_dataset = create_chunks(viedo_dataset)
+        self.data = video_dataset
+
 
     def __getitem__(self, idx):
         """
