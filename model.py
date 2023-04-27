@@ -99,8 +99,6 @@ class PositionalEncoding(nn.Module):
         # Residual connection + pos encoding
         return self.dropout(token_embedding + self.pos_encoding[:token_embedding.size(0), :])
 
-
-
 class KeypointCompleter(nn.Module):
     def __init__(self, input_size, hidden_dim, num_layers):
         super(KeypointCompleter, self).__init__()
