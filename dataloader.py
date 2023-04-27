@@ -334,18 +334,25 @@ def put_missing_values(video, body_parts_class):
 
     return video, None
 
-def put_missing_frames(video, hidden_dim):
+def put_missing_frames(video, is_random_missing):
 
-    # Numbers of frames to create missing landmarks
-    missing_amount = random.randrange(1, video.shape[0])
+    if is_random_missing:
+        # Numbers of frames to create missing landmarks
+        missing_amount = random.randrange(1, video.shape[0])
 
-    # chose randomly the number of frames you desire
-    missing_samples = random.choices(range(video.shape[0]), k=missing_amount)
+        # we chose randomly the number of frames you desire
+        missing_samples = random.choices(range(video.shape[0]), k=missing_amount)
 
-    if hidden_dim == None:
-        mask = torch.zeros([video.shape[0]])
     else:
-        mask = torch.zeros([video.shape[0]])
+        # we chose the how many contiguous missing landmarks the video will have 
+        number_contiguous_missVal = random.randrange(1, 7)
+
+        # we chose a random position to create missing landarks (from 0 to max_pos)
+        max_pos = video.shape[0] - number_contiguous_missVal
+        initial_pos = random.choices(range(max_pos), k=1)
+        missing_samples = [initial_pos[0] + k for k in list(range(number_contiguous_missVal))]
+
+    mask = torch.zeros([video.shape[0]])
 
     for r, pos in enumerate(missing_samples):
 
@@ -457,7 +464,7 @@ class LSP_Dataset(Dataset):
     def __init__(self, dataset_filename: str,keypoints_model:str,  transform=None, have_aumentation=True,
                  augmentations_prob=0.5, normalize=False,landmarks_ref= 'Mapeo landmarks librerias.csv',
                  keypoints_number = 54,
-                 hidden_dim=None):
+                 hidden_dim=None, is_random_missing=False):
         """
         Initiates the HPOESDataset with the pre-loaded data from the h5 file.
 
@@ -492,6 +499,9 @@ class LSP_Dataset(Dataset):
         self.augmentation = augmentation.augmentation(keypoint_body_part_index, body_section_dict)
         self.augmentations_prob = augmentations_prob
         self.normalize = normalize
+
+        # missing value way to add 
+        self.is_random_missing = is_random_missing
 
         # CREATE CHUNKS
         viedo_dataset = create_chunks(viedo_dataset)
@@ -532,7 +542,7 @@ class LSP_Dataset(Dataset):
         #depth_map_missing, mask = put_missing_values(depth_map.clone(), self.body_parts_class)
         
         # Missing frames
-        depth_map_missing, mask = put_missing_frames(depth_map.clone(), self.hidden_dim)
+        depth_map_missing, mask = put_missing_frames(depth_map.clone(), self.is_random_missing)
 
         # add SOS in the data and mask
         depth_map_missing, mask = add_sos_eos(depth_map_missing, mask)

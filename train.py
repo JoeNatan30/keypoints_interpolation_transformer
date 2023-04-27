@@ -21,6 +21,7 @@ from utils import prepare_keypoints_image, get_edges_index
 CONFIG_FILENAME = "config.json"
 PROJECT_WANDB = "fill_missings_transformer"
 ENTITY = "joenatan30" #joenatan30
+TAG = ["paper"]
 
 os.environ["WANDB_API_KEY"] = "8b69e5a1943f75b652c694fbe3875c3216e3fbe6"
 
@@ -218,7 +219,7 @@ if __name__ == '__main__':
                      config=args, 
                      name=args.experiment_name, 
                      job_type="model-training",
-                     tags=["paper"])
+                     tags=TAG)
     config = wandb.config
 
     train(args)
