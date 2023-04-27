@@ -42,8 +42,20 @@ def lr_lambda(current_step, optim):
     optim.param_groups[0]['lr'] = lr_rate
 
     return optim
+def sent_test_result(model, inputs, mask, device):
 
-def sent_validation_and_test_results(model, inputs, prediction, sota, connections, device):
+    tgt_mask = model.get_tgt_mask(len(inputs)).to(device)
+
+    pred = model(inputs, inputs, decoder_mask=mask, tgt_mask=tgt_mask)
+
+    pred_images = prepare_keypoints_image(pred[0], connections, -1, "Test")
+    for _rel_pos in range(1, len(inputs)):
+        pred_images = np.concatenate((pred_images, prepare_keypoints_image(pred[_rel_pos], connections, _rel_pos-1)), axis=1)
+
+    images = wandb.Image(pred_images, caption="Validation")
+    wandb.log({"examples of test": images})
+
+def sent_validation_result(inputs, prediction, sota, connections):
 
     # add input
     input_images = prepare_keypoints_image(inputs[0], connections, -1, "Input")
@@ -64,6 +76,9 @@ def sent_validation_and_test_results(model, inputs, prediction, sota, connection
     images = wandb.Image(output, caption="Validation")
     wandb.log({"examples_validation epoch": images})
 
+
+    ## TEST
+    '''
     # send Test
     _, Kp_size, coord_size = inputs.shape
 
@@ -74,7 +89,7 @@ def sent_validation_and_test_results(model, inputs, prediction, sota, connection
 
     eos = torch.zeros(1, Kp_size, coord_size-1).to(device)  # tensor de mitad ceros y mitad unos
     eos = torch.cat((eos,y_recursive[:,:,-1:].clone()), dim=2)
-
+    
     for _rel_pos in range(1, len(inputs)+5):
 
         tgt_mask = model.get_tgt_mask(len(y_recursive)).to(device)
@@ -96,9 +111,10 @@ def sent_validation_and_test_results(model, inputs, prediction, sota, connection
 
     images = wandb.Image(test_images, caption="Test Output")
     wandb.log({"examples of test": images})
-
+    '''
 
 def train_epoch(model, dataloader, criterion, optimizer, device):
+
     model.train()
     running_loss = 0.0
 
@@ -114,7 +130,7 @@ def train_epoch(model, dataloader, criterion, optimizer, device):
             mask = mask.squeeze(0).to(device).float()
         
         tgt_mask = model.get_tgt_mask(inputs.shape[0]).to(device)
-        prediction = model(inputs, sota[:-1,:,:], mask, tgt_mask)
+        prediction = model(inputs, sota[:-1,:,:], coder_mask=mask, tgt_mask=tgt_mask)
 
         loss = criterion(prediction, sota[1:,:,:])
         loss = loss.float()
@@ -141,9 +157,11 @@ def eval_epoch(model, dataloader, criterion, body_parts_class, device):
         inputs = inputs.squeeze(0).to(device).float()
         sota = sota.squeeze(0).to(device).float()
 
+        if mask!=None:
+            mask = mask.squeeze(0).to(device).float()
 
         tgt_mask = model.get_tgt_mask(inputs.shape[0]).to(device)
-        prediction = model(inputs, sota[:-1,:,:], tgt_mask=tgt_mask)
+        prediction = model(inputs, sota[:-1,:,:], coder_mask=mask,tgt_mask=tgt_mask)
 
         loss = criterion(prediction, sota[1:,:,:])
         loss = loss.float()
@@ -151,7 +169,8 @@ def eval_epoch(model, dataloader, criterion, body_parts_class, device):
 
         # Print in WandB
         if i == 1:
-            sent_validation_and_test_results(model, inputs, prediction, sota[1:,:,:], connections, device)
+            sent_validation_result(inputs, prediction, sota[1:,:,:], connections)
+            sent_test_result(model, inputs, mask, device)
 
     return running_loss/data_length
 

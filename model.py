@@ -126,7 +126,7 @@ class KeypointCompleter(nn.Module):
         # FINAL LAYER (LINEAR)
         self.fc = nn.Linear(hidden_dim, input_size)
 
-    def forward(self, inputs, trueInput=None, mask=None, tgt_mask=None):
+    def forward(self, inputs, trueInput=None, coder_mask=None, decoder_mask=None, tgt_mask=None):
 
         h = torch.unsqueeze(inputs.flatten(start_dim=1), 1).float()
         h = self.embedding(h)
@@ -136,11 +136,15 @@ class KeypointCompleter(nn.Module):
         o = self.embedding(o)
         o = self.positional_encoder(o)
 
-        if mask==None:
-            h = self.transformer(h, o, tgt_mask=tgt_mask).transpose(0, 1)
+        if coder_mask==None:
+            if decoder_mask==None:
+                h = self.transformer(h, o, tgt_mask=tgt_mask).transpose(0, 1)
+            else:
+                h = self.transformer(h, o, tgt_key_padding_mask=decoder_mask, tgt_mask=tgt_mask).transpose(0, 1)
+            
         else:
             # the reason of use of src_key_padding_mask is here: https://discuss.pytorch.org/t/transformer-difference-between-src-mask-and-src-key-padding-mask/84024
-            h = self.transformer(h, o, src_key_padding_mask=mask, tgt_mask=tgt_mask).transpose(0, 1)
+            h = self.transformer(h, o, src_key_padding_mask=coder_mask, tgt_mask=tgt_mask).transpose(0, 1)
            
         decoded = self.fc(h)
 
