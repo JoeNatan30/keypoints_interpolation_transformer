@@ -128,11 +128,26 @@ class KeypointCompleter(nn.Module):
 
     def forward(self, inputs, trueInput=None, coder_mask=None, decoder_mask=None, tgt_mask=None):
 
-        h = torch.unsqueeze(inputs.flatten(start_dim=1), 1).float()
+        # Use Batch
+        if len(inputs.shape) != 3:
+            h = inputs.flatten(start_dim=2).float()
+            h = torch.permute(h, (1, 0, 2))
+            o = trueInput.flatten(start_dim=2).float()
+            o = torch.permute(o, (1, 0, 2))
+            if coder_mask != None:
+                coder_mask = torch.permute(coder_mask, (1, 0, 2))
+                coder_mask = coder_mask.squeeze(0)
+            if decoder_mask != None:
+                decoder_mask = torch.permute(decoder_mask, (1, 0, 2))
+                decoder_mask = decoder_mask.squeeze(0)
+        # Not use batch
+        else:
+            h = torch.unsqueeze(inputs.flatten(start_dim=1), 1).float()
+            o = torch.unsqueeze(trueInput.flatten(start_dim=1), 1).float()
+
         h = self.embedding(h)
         h = self.positional_encoder(h)
 
-        o = torch.unsqueeze(trueInput.flatten(start_dim=1), 1).float()
         o = self.embedding(o)
         o = self.positional_encoder(o)
 
@@ -145,12 +160,24 @@ class KeypointCompleter(nn.Module):
         else:
             # the reason of use of src_key_padding_mask is here: https://discuss.pytorch.org/t/transformer-difference-between-src-mask-and-src-key-padding-mask/84024
             h = self.transformer(h, o, src_key_padding_mask=coder_mask, tgt_mask=tgt_mask).transpose(0, 1)
-           
+        
+
         decoded = self.fc(h)
+    
+        # Use Batch
+        if len(inputs.shape) != 3:
 
-        decoded = decoded.squeeze(0).unsqueeze(1)
-        decoded = decoded.permute(0, 2, 1).view(-1, 54, 2)
+            decoded = decoded.unsqueeze(2) # torch.Size([N, S, E]) ->  torch.Size([N, S, 1, E])
+            decoded = decoded.permute(0, 1, 3, 2) # | ->  torch.Size([N, S, E, 1])
+            decoded = decoded.view(decoded.shape[0],-1, 54, 2) # | ->  torch.Size([N, S, E/D, D])
 
+        else:
+            decoded = decoded.squeeze(0).unsqueeze(1) # torch.Size([1, S, E]) -> torch.Size([S, 1, E])
+            decoded = decoded.permute(0, 2, 1) # | -> torch.Size([S, E, 1])
+            decoded = decoded.view(-1, 54, 2) # | -> torch.Size([S, E/D, D])
+
+        #decoded = self.fc(h)
+    
         return decoded
 
     def get_tgt_mask(self, size) -> torch.tensor:

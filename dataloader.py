@@ -464,7 +464,7 @@ class LSP_Dataset(Dataset):
     def __init__(self, dataset_filename: str,keypoints_model:str,  transform=None, have_aumentation=True,
                  augmentations_prob=0.5, normalize=False,landmarks_ref= 'Mapeo landmarks librerias.csv',
                  keypoints_number = 54,
-                 hidden_dim=None, is_random_missing=False):
+                 hidden_dim=None, is_random_missing=True):
         """
         Initiates the HPOESDataset with the pre-loaded data from the h5 file.
 
@@ -504,7 +504,7 @@ class LSP_Dataset(Dataset):
         self.is_random_missing = is_random_missing
 
         # CREATE CHUNKS
-        viedo_dataset = create_chunks(viedo_dataset)
+        video_dataset = create_chunks(viedo_dataset)
         self.data = video_dataset
 
 

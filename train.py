@@ -23,7 +23,7 @@ PROJECT_WANDB = "fill_missings_transformer"
 ENTITY = "joenatan30" #joenatan30
 TAG = ["paper"]
 
-os.environ["WANDB_API_KEY"] = "4a4a03af42fe8680095fb073e192fa65f181739d"
+os.environ["WANDB_API_KEY"] = "c16c54799944a6127132bcb81b2fb9ebcb4fe5db"
 
 connections = np.moveaxis(np.array(get_edges_index('54')), 0, 1)
 
@@ -48,9 +48,9 @@ def sent_test_result(model, inputs, mask, device):
 
     pred = model(inputs, inputs, decoder_mask=mask, tgt_mask=tgt_mask)
 
-    pred_images = prepare_keypoints_image(pred[0], connections, -1, "Test")
+    pred_images = prepare_keypoints_image(pred[0], connections, 0, "Test")
     for _rel_pos in range(1, len(inputs)):
-        pred_images = np.concatenate((pred_images, prepare_keypoints_image(pred[_rel_pos], connections, _rel_pos-1)), axis=1)
+        pred_images = np.concatenate((pred_images, prepare_keypoints_image(pred[_rel_pos], connections, _rel_pos)), axis=1)
 
     images = wandb.Image(pred_images, caption="Validation")
     wandb.log({"examples of test": images})
@@ -121,6 +121,7 @@ def train_epoch(model, dataloader, criterion, optimizer, device):
     data_length = len(dataloader)
 
     for i, data in enumerate(dataloader):
+
         inputs, sota, mask = data
 
         inputs = inputs.squeeze(0).to(device).float()
@@ -129,11 +130,19 @@ def train_epoch(model, dataloader, criterion, optimizer, device):
         if mask!=None:
             mask = mask.squeeze(0).to(device).float()
         
-        tgt_mask = model.get_tgt_mask(inputs.shape[0]).to(device)
-        prediction = model(inputs, sota[:-1,:,:], coder_mask=mask, tgt_mask=tgt_mask)
+        
+        # Use Batch
+        if len(inputs.shape) != 3: # is 4 if you are using batch
+            tgt_mask = model.get_tgt_mask(inputs.shape[1]).to(device)
+            prediction = model(inputs, sota[:,:-1,:,:], coder_mask=mask, tgt_mask=tgt_mask)
+            loss = criterion(prediction, sota[:,1:,:,:])
+        # No use Batch
+        else:
+            tgt_mask = model.get_tgt_mask(inputs.shape[0]).to(device)
+            prediction = model(inputs, sota[:-1,:,:], coder_mask=mask, tgt_mask=tgt_mask)
+            loss = criterion(prediction, sota[1:,:,:])
 
-        loss = criterion(prediction, sota[1:,:,:])
-        loss = loss.float()
+        loss = loss.float()    
 
         optimizer.zero_grad()
         loss.backward()
@@ -160,17 +169,31 @@ def eval_epoch(model, dataloader, criterion, body_parts_class, device):
         if mask!=None:
             mask = mask.squeeze(0).to(device).float()
 
-        tgt_mask = model.get_tgt_mask(inputs.shape[0]).to(device)
-        prediction = model(inputs, sota[:-1,:,:], coder_mask=mask,tgt_mask=tgt_mask)
+        # Use Batch
+        if len(inputs.shape) != 3: # is 4 if you are using batch
+            tgt_mask = model.get_tgt_mask(inputs.shape[1]).to(device)
+            prediction = model(inputs, sota[:,:-1,:,:], coder_mask=mask, tgt_mask=tgt_mask)
+            loss = criterion(prediction, sota[:,1:,:,:])
+        # No use Batch
+        else:
+            tgt_mask = model.get_tgt_mask(inputs.shape[0]).to(device)
+            prediction = model(inputs, sota[:-1,:,:], coder_mask=mask, tgt_mask=tgt_mask)
+            loss = criterion(prediction, sota[1:,:,:])
 
-        loss = criterion(prediction, sota[1:,:,:])
-        loss = loss.float()
+        loss = loss.float()    
         running_loss += loss
 
         # Print in WandB
         if i == 1:
-            sent_validation_result(inputs, prediction, sota[1:,:,:], connections)
-            sent_test_result(model, inputs, mask, device)
+            # Use Batch
+            if len(inputs.shape) != 3:
+                batch_pos = 1
+                sent_validation_result(inputs[batch_pos], prediction[batch_pos], sota[batch_pos,1:,:,:], connections)
+                sent_test_result(model, inputs[batch_pos], mask[batch_pos], device)
+            # No use Batch
+            else:
+                sent_validation_result(inputs, prediction, sota[1:,:,:], connections)
+                sent_test_result(model, inputs, mask, device)
 
     return running_loss/data_length
 
@@ -195,8 +218,8 @@ def train(args):
                                        have_aumentation=False, 
                                        keypoints_model='mediapipe')
 
-    train_loader = DataLoader(train_set, shuffle=True,  generator=g)
-    val_loader = DataLoader(val_set, shuffle=False,  generator=g)
+    train_loader = DataLoader(train_set, shuffle=True, batch_size=16, generator=g)
+    val_loader = DataLoader(val_set, shuffle=False, batch_size=16, generator=g)
     
     keysecom_model = model.KeypointCompleter(input_size=54*2, hidden_dim=128, num_layers=6)
     wandb.watch(keysecom_model)
