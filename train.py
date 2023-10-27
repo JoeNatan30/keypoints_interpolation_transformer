@@ -23,11 +23,9 @@ PROJECT_WANDB = "fill_missings_transformer"
 ENTITY = "joenatan30" #joenatan30
 TAG = ["paper"]
 
-os.environ["WANDB_API_KEY"] = "c16c54799944a6127132bcb81b2fb9ebcb4fe5db"
+#os.environ["WANDB_API_KEY"] = "c16c54799944a6127132bcb81b2fb9ebcb4fe5db"
 
 connections = np.moveaxis(np.array(get_edges_index('54')), 0, 1)
-
-
 
 def lr_lambda(current_step, optim):
     

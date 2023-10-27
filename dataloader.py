@@ -200,7 +200,7 @@ def normalize_pose_hands_function(data, body_parts_class):
 
     assert len(pose) > 0 and len(leftHand) > 0 and len(rightHand) > 0 #and len(face) > 0
 
-    prepare_keypoints_image(data[2][2][:,:],"before")
+    #prepare_keypoints_image(data[2][2][:,:],"before")
 
     for index_video in range(len(data)):
         data[index_video][:,pose+leftHand+rightHand,:] = normalize_pose(data[index_video][:,pose+leftHand+rightHand,:], body_section_dict)
@@ -208,7 +208,7 @@ def normalize_pose_hands_function(data, body_parts_class):
         #data[index_video][:,leftHand,:] = normalize_hand(data[index_video][:,leftHand,:], body_section_dict)
         #data[index_video][:,rightHand,:] = normalize_hand(data[index_video][:,rightHand,:], body_section_dict)
 
-    prepare_keypoints_image(data[2][2][:,:],"after")
+    #prepare_keypoints_image(data[2][2][:,:],"after")
 
     kp_bp_index = {'pose':pose,
                    'left_hand':leftHand,
@@ -223,34 +223,15 @@ def get_dataset_from_hdf5(path,keypoints_model, landmarks_ref, keypoints_number)
     print('landmarks_ref              :',landmarks_ref)
 
     # Prepare the data to process the dataset
-
-    index_array_column = None #'mp_indexInArray', 'wp_indexInArray','op_indexInArray'
-
     print('Use keypoint model : ',keypoints_model) 
-    if keypoints_model == 'openpose':
-        index_array_column  = 'op_indexInArray'
-    if keypoints_model == 'mediapipe':
-        index_array_column  = 'mp_indexInArray'
-    if keypoints_model == 'wholepose':
-        index_array_column  = 'wp_indexInArray'
-    print('use column for index keypoint :',index_array_column)
-
-    assert not index_array_column is None
 
     # all the data from landmarks_ref
     df_keypoints = pd.read_csv(landmarks_ref, skiprows=1)
-
-    # 29, 54 or 71 points
-    if keypoints_number == 29:
-        df_keypoints = df_keypoints[(df_keypoints['Selected 29']=='x' )& (df_keypoints['Key']!='wrist')]
-    elif keypoints_number == 71:
-        df_keypoints = df_keypoints[(df_keypoints['Selected 71']=='x' )& (df_keypoints['Key']!='wrist')]
-    else:
-        df_keypoints = df_keypoints[(df_keypoints['Selected 54']=='x')]
+    df_keypoints = df_keypoints[(df_keypoints['Selected 54']=='x')]
 
     logging.info(" using keypoints_number: "+str(keypoints_number))
 
-    idx_keypoints = sorted(df_keypoints[index_array_column].astype(int).values)
+    idx_keypoints = sorted(df_keypoints['mp_indexInArray'].astype(int).values)
     name_keypoints = df_keypoints['Key'].values
     section_keypoints = (df_keypoints['Section']+'_'+df_keypoints['Key']).values
 
@@ -268,29 +249,18 @@ def get_dataset_from_hdf5(path,keypoints_model, landmarks_ref, keypoints_number)
 
     print('Total size dataset : ',len(data.keys()))
 
-    video_dataset  = []
+    group = data['no_missing']
+    _data = group['data']
+    _label = group['label']
+    _length = group['length']
+    _data_video_name = group['video_name']
+    _shape = group['shape']
+    
+    labels_dataset = [value.decode('utf-8') for value in _label]
+    data_dataset  = [np.transpose(np.array(value).reshape(length, _shape[0], _shape[1]), (0,2,1)) for value, length in zip(_data, _length)]
+    name_dataset = [value.decode('utf-8') for value in _data_video_name]
 
-    time.sleep(2)
-    for index in tqdm.tqdm(list(data.keys())):
-
-        data_video = np.array(data[index]['data'])
-        data_label = np.array(data[index]['label']).item().decode('utf-8')
-
-
-
-        # F x C x K  (frames, coords, keypoitns)
-        n_frames, n_axis, n_keypoints = data_video.shape
-
-        data_video = np.transpose(data_video, (0,2,1)) #transpose to n_frames, n_keypoints, n_axis 
-        if index=='0':
-            print('original size video : ',data_video.shape)
-            print('filtering by keypoints idx .. ')
-        data_video = data_video[:,idx_keypoints,:]
-
-        if index=='0':
-            print('filtered size video : ',data_video.shape)
-
-        video_dataset.append(data_video)
+    assert len(data_dataset) == len(labels_dataset) == len(name_dataset)
 
     del data
     gc.collect()
@@ -299,7 +269,7 @@ def get_dataset_from_hdf5(path,keypoints_model, landmarks_ref, keypoints_number)
 
     print('Reading dataset completed!')
 
-    return video_dataset, df_keypoints['Section'], section_keypoints
+    return data_dataset, df_keypoints['Section'], section_keypoints
 
 def replace_points(data, timestep, hand, wrist):
     
@@ -338,14 +308,14 @@ def put_missing_frames(video, is_random_missing):
 
     if is_random_missing:
         # Numbers of frames to create missing landmarks
-        missing_amount = random.randrange(1, video.shape[0])
+        missing_amount = int(video.shape[0]*(60/100)) #random.randrange(1, video.shape[0])
 
         # we chose randomly the number of frames you desire
         missing_samples = random.choices(range(video.shape[0]), k=missing_amount)
 
     else:
         # we chose the how many contiguous missing landmarks the video will have 
-        number_contiguous_missVal = random.randrange(1, 7)
+        number_contiguous_missVal = random.randrange(4, 7)
 
         # we chose a random position to create missing landarks (from 0 to max_pos)
         max_pos = video.shape[0] - number_contiguous_missVal
@@ -463,8 +433,7 @@ class LSP_Dataset(Dataset):
 
     def __init__(self, dataset_filename: str,keypoints_model:str,  transform=None, have_aumentation=True,
                  augmentations_prob=0.5, normalize=False,landmarks_ref= 'Mapeo landmarks librerias.csv',
-                 keypoints_number = 54,
-                 hidden_dim=None, is_random_missing=True):
+                 keypoints_number = 54, hidden_dim=None, is_random_missing=True):
         """
         Initiates the HPOESDataset with the pre-loaded data from the h5 file.
 
@@ -504,7 +473,7 @@ class LSP_Dataset(Dataset):
         self.is_random_missing = is_random_missing
 
         # CREATE CHUNKS
-        video_dataset = create_chunks(viedo_dataset)
+        #video_dataset = create_chunks(viedo_dataset)
         self.data = video_dataset
 
 
@@ -515,7 +484,7 @@ class LSP_Dataset(Dataset):
         :param idx: Index of the item
         :return: Tuple containing both the depth map and the label
         """
-        depth_map = torch.from_numpy(np.copy(self.data[idx]))
+        depth_map = torch.from_numpy(self.data[idx])
 
         # Apply potential augmentations
         if self.have_aumentation and random.random() < self.augmentations_prob:
@@ -542,7 +511,7 @@ class LSP_Dataset(Dataset):
         #depth_map_missing, mask = put_missing_values(depth_map.clone(), self.body_parts_class)
         
         # Missing frames
-        depth_map_missing, mask = put_missing_frames(depth_map.clone(), self.is_random_missing)
+        depth_map_missing, mask = put_missing_frames(depth_map.clone().detach(), self.is_random_missing)
 
         # add SOS in the data and mask
         depth_map_missing, mask = add_sos_eos(depth_map_missing, mask)

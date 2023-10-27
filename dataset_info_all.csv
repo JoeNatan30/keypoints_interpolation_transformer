@@ -1,0 +1,5 @@
+Name,hdf5_file,csv_file
+AEC,../PeruvianSignLanguage/Data/AEC/AEC--mediapipe.hdf5,../missingValueAnalisys/AEC_without_missing_values.csv
+PUCP_PSL_DGI305,../PeruvianSignLanguage/Data/PUCP_PSL_DGI305/PUCP_PSL_DGI305--mediapipe.hdf5,../missingValueAnalisys/PUCP_PSL_DGI305_without_missing_values.csv
+AUTSL,../PeruvianSignLanguage/Data/AUTSL/AUTSL--mediapipe.hdf5,../missingValueAnalisys/AUTSL_without_missing_values.csv
+LSA64,../PeruvianSignLanguage/Data/LSA64/LSA64--mediapipe.hdf5,../missingValueAnalisys/LSA64_without_missing_values.csv
