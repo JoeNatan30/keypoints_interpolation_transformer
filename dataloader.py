@@ -1,7 +1,6 @@
 import gc
 import ast
 import tqdm
-import time
 import h5py
 import glob
 import torch
@@ -16,6 +15,11 @@ import random
 import augmentation
 
 import cv2
+
+np.random.seed(42)
+pd.np.random.seed(42)
+torch.manual_seed(42)
+random.seed(42)
 
 def get_data_from_h5(path):
     hf = h5py.File(path, 'r')
@@ -306,6 +310,8 @@ def put_missing_values(video, body_parts_class):
 
 def put_missing_frames(video, is_random_missing):
 
+    missing_samples = []
+
     if is_random_missing:
         # Numbers of frames to create missing landmarks
         missing_amount = int(video.shape[0]*(60/100)) #random.randrange(1, video.shape[0])
@@ -314,13 +320,30 @@ def put_missing_frames(video, is_random_missing):
         missing_samples = random.choices(range(video.shape[0]), k=missing_amount)
 
     else:
-        # we chose the how many contiguous missing landmarks the video will have 
-        number_contiguous_missVal = random.randrange(4, 7)
+        
+        num_bloques = random.randint(4, 7)
+    
+        section_size = len(video) // num_bloques
+        rest = len(video) % num_bloques
+        
+        
 
-        # we chose a random position to create missing landarks (from 0 to max_pos)
-        max_pos = video.shape[0] - number_contiguous_missVal
-        initial_pos = random.choices(range(max_pos), k=1)
-        missing_samples = [initial_pos[0] + k for k in list(range(number_contiguous_missVal))]
+        for _range in range(num_bloques):
+            
+            # Genera un número aleatorio entre 3 y 8 para determinar cuántos valores reemplazar con ceros
+            num_ceros = random.randint(3, 8)
+            num_ceros = min(num_ceros, section_size)
+            # Selecciona una posición aleatoria en el tensor
+            _rest = rest if _range == (num_bloques-1) else 0
+            offset = random.randint(0, num_ceros)
+            pos_inicio = section_size * _range + offset + _rest
+            
+            # Calcula la posición final del bloque
+            pos_fin = min(pos_inicio + num_ceros, len(video))
+            print(f"pos {_range}: {pos_inicio} -> {pos_fin}({num_ceros})")
+            
+            for _pos in range(pos_inicio, pos_fin):
+                missing_samples.append(_pos)
 
     mask = torch.zeros([video.shape[0]])
 
@@ -337,7 +360,7 @@ def filter_bad_videos(video, body_section_dict):
     is_bad = False
 
     # More than # value (because we delete about 12 frames 6 at the beginning ant 6 at final)
-    if len(video) < 20:
+    if len(video) < 10:
         is_bad = True
     else:
         video = video[8:-8,:,:]
@@ -433,7 +456,7 @@ class LSP_Dataset(Dataset):
 
     def __init__(self, dataset_filename: str,keypoints_model:str,  transform=None, have_aumentation=True,
                  augmentations_prob=0.5, normalize=False,landmarks_ref= 'Mapeo landmarks librerias.csv',
-                 keypoints_number = 54, hidden_dim=None, is_random_missing=True):
+                 keypoints_number = 54, hidden_dim=None, is_random_missing=False):
         """
         Initiates the HPOESDataset with the pre-loaded data from the h5 file.
 

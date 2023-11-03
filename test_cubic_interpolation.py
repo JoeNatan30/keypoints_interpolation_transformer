@@ -5,9 +5,14 @@ from torch.nn import MSELoss
 import torch
 import numpy as np
 import pandas as pd
-from scipy.interpolate import interp1d
-import time
 from tqdm import tqdm
+import matplotlib.pyplot as plt
+
+
+np.random.seed(42)
+pd.np.random.seed(42)
+torch.manual_seed(42)
+
 
 def replace_frame_with_zeros(inputs, mask):
     # Asegurarse de que 'inputs' y 'mask' tengan el mismo tamaño
@@ -34,7 +39,7 @@ def cubic_interpolation(data):
         
         df['x'] = df['x'].replace(0, np.nan).interpolate(method='cubic', limit_direction='both')
         df['y'] = df['y'].replace(0, np.nan).interpolate(method='cubic', limit_direction='both')
-        
+
         interpolated_data[kp_pos][0] = torch.from_numpy(np.nan_to_num(df['x'].values))
         interpolated_data[kp_pos][1] = torch.from_numpy(np.nan_to_num(df['y'].values))
 
@@ -70,6 +75,15 @@ def main():
         loss_collector.append(loss)
 
 
-    print(sum(loss_collector)/len(loss_collector))
+    #print(sum(loss_collector)/len(loss_collector))
+    # Crear un histograma
+    plt.hist(loss_collector, bins=24, edgecolor='black', color='skyblue', alpha=0.7)  # Ajusta alpha para transparencia
+    # Agregar líneas de cuadrícula
+    plt.grid(axis='y', linestyle='--', alpha=0.7)
+    plt.title('Histogram of loss - Cubic')
+    plt.xlabel('Loss')
+    plt.ylabel('Frequence')
+    plt.savefig('cubic_histogram.jpg')
+    plt.legend(['Datos'])
     
 main()
