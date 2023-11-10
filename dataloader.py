@@ -330,15 +330,14 @@ def put_missing_frames(video, is_random_missing):
 
         for _range in range(num_bloques):
             
-            # Genera un número aleatorio entre 3 y 8 para determinar cuántos valores reemplazar con ceros
             num_ceros = random.randint(3, 8)
             num_ceros = min(num_ceros, section_size)
-            # Selecciona una posición aleatoria en el tensor
+
             _rest = rest if _range == (num_bloques-1) else 0
             offset = random.randint(0, num_ceros)
             pos_inicio = section_size * _range + offset + _rest
             
-            # Calcula la posición final del bloque
+
             pos_fin = min(pos_inicio + num_ceros, len(video))
             print(f"pos {_range}: {pos_inicio} -> {pos_fin}({num_ceros})")
             
