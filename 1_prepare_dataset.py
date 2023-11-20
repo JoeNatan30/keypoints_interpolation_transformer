@@ -2,6 +2,7 @@ import os
 import pandas as pd
 import numpy as np
 import h5py
+from utils import load_configuration
 
 def read_csv_file(csv_file):
     return pd.read_csv(csv_file, encoding='utf-8')
@@ -73,7 +74,10 @@ def got_h5_data(path_list, info_dict, idx_keypoints):
     return path_list
 
 def main():
-    dataset_info = pd.read_csv('./dataset_info.csv', encoding='utf-8')
+    
+    to_process = "PUCP_PSL_DGI305"
+    
+    dataset_info = load_configuration("dataset_config")#pd.read_csv('./dataset_info.csv', encoding='utf-8')
     
     df_keypoints = pd.read_csv('Mapeo landmarks librerias.csv', skiprows=1)
     df_keypoints = df_keypoints[(df_keypoints['Selected 54']=='x')]
@@ -82,16 +86,24 @@ def main():
     missing_train = pd.DataFrame()
     missing_valid = pd.DataFrame()
     
-    for index, dataset in dataset_info.iterrows():
-        #print(dataset['Name'])
-        print(dataset['hdf5_file'])
-        #print(dataset['csv_file'])
+    for dataset, config  in dataset_info.items():
+        
+        if dataset != to_process and to_process != "all":
+            continue
+        
+        config = {k: v for k, v in config.items()}
+
+
+        h5_path = config.get('hdf5_file', None)
+        csv_path = config.get('csv_file', None)
+        
+        print(h5_path)
 
         # leer h5
-        h5_file = h5py.File(dataset['hdf5_file'], 'r')
+        h5_file = h5py.File(h5_path, 'r')
         
         # obtener lista
-        no_missing = read_csv_file(dataset['csv_file'])
+        no_missing = read_csv_file(csv_path)
         
         # obtener datos h5
         data_h5 = got_h5_data(no_missing, h5_file, idx_keypoints)
@@ -109,8 +121,8 @@ def main():
     print(missing_train)
     # crear nuevo h5 file
 
-    train_h5_file = h5py.File('training.hdf5', 'w')
-    valid_h5_file = h5py.File('validation.hdf5', 'w')
+    train_h5_file = h5py.File(f'data/training--{to_process}.hdf5', 'w')
+    valid_h5_file = h5py.File(f'data/validation--{to_process}.hdf5', 'w')
     
     train_group = generate_h5_metadata(train_h5_file, 'no_missing')
     valid_group = generate_h5_metadata(valid_h5_file, 'no_missing')

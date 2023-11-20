@@ -1,6 +1,7 @@
 import pandas as pd
 import numpy as np
 import cv2
+import json
 
 def prepare_keypoints_image(keypoints,tag):
     # this vaariable is feeded in draw points process and used in the draw joint lines proceess
@@ -107,3 +108,10 @@ def get_edges_index(keypoints_number=71):
     tar = np.array(tar)
 
     return np.array([ori,tar])
+
+def load_configuration(name):
+    # Cargar configuraciones desde JSON
+    with open(f"{name}.json", 'r') as archivo_json:
+        config = json.load(archivo_json)
+
+    return config
