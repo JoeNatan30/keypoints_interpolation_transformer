@@ -8,7 +8,7 @@ def get_default_args():
     parser.add_argument("--num_classes", type=int, default=50, help="Number of classes to be recognized by the model")
     parser.add_argument("--hidden_dim", type=int, default=108,
                         help="Hidden dimension of the underlying Transformer model")
-    parser.add_argument("--seed", type=int, default=379,
+    parser.add_argument("--seed", type=int, default=42,
                         help="Seed with which to initialize all the random components of the training")
 
     # Data
@@ -24,7 +24,7 @@ def get_default_args():
 
     # Training hyperparameters
     parser.add_argument("--epochs", type=int, default=100, help="Number of epochs to train the model for")
-    parser.add_argument("--lr", type=float, default=0.001, help="Learning rate for the model training")
+    parser.add_argument("--lr", type=float, default=0.00005, help="Learning rate for the model training")
 
     # Checkpointing
     parser.add_argument("--save_checkpoints", type=bool, default=True,

@@ -197,7 +197,7 @@ class augmentation():
 
         augmented_zero_landmark = cv2.perspectiveTransform(np.array([[[0, 0]]], dtype=np.float32), mtx)[0][0]
         augmented_landmarks = np.stack([np.where(sub == augmented_zero_landmark, [0, 0], sub) for sub in augmented_landmarks])
-        sign[:,self.BODY_IDENTIFIERS,:] = torch.tensor(augmented_landmarks)
+        sign[:,self.BODY_IDENTIFIERS,:] = torch.tensor(augmented_landmarks).float()
         #body_landmarks = self.__numpy_to_dictionary(augmented_landmarks)
 
         return sign#self.__wrap_sign_into_row(body_landmarks, hand_landmarks)

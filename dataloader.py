@@ -3,6 +3,7 @@ import ast
 import tqdm
 import h5py
 import glob
+import math
 import torch
 import pandas as pd
 import numpy as np
@@ -15,6 +16,8 @@ import random
 import augmentation
 
 import cv2
+
+from utils import load_configuration
 
 np.random.seed(42)
 pd.np.random.seed(42)
@@ -308,10 +311,12 @@ def put_missing_values(video, body_parts_class):
 
     return video, None
 
-def put_missing_frames(video, is_random_missing):
+def put_missing_frames(video, is_random_missing, dataset_name):
 
     missing_samples = []
-
+    
+    dataset_info = load_configuration("dataset_config")
+    
     if is_random_missing:
         # Numbers of frames to create missing landmarks
         missing_amount = int(video.shape[0]*(60/100)) #random.randrange(1, video.shape[0])
@@ -319,28 +324,79 @@ def put_missing_frames(video, is_random_missing):
         # we chose randomly the number of frames you desire
         missing_samples = random.choices(range(video.shape[0]), k=missing_amount)
 
-    else:
+    elif dataset_name == 'all':
         
-        num_bloques = random.randint(4, 7)
-    
-        section_size = len(video) // num_bloques
-        rest = len(video) % num_bloques
+        num_blocks = random.randint(4, 7)
         
+        section_size = len(video) // num_blocks
+        rest = len(video) % num_blocks
         
-
-        for _range in range(num_bloques):
+        for _range in range(num_blocks):
             
             num_ceros = random.randint(3, 8)
             num_ceros = min(num_ceros, section_size)
 
-            _rest = rest if _range == (num_bloques-1) else 0
-            offset = random.randint(0, num_ceros)
-            pos_inicio = section_size * _range + offset + _rest
+            _rest = rest if _range == (num_blocks-1) else 0
             
-
+            # |rr+++++----&&|
+            # r = rest
+            # + = offset
+            # - = missing
+            # & = another values which is not missing in the length of the section size (not consider in the formula)
+            offset = random.randint(0, min(0, _rest + section_size - num_ceros))
+                                    
+            pos_inicio = section_size * _range + offset
             pos_fin = min(pos_inicio + num_ceros, len(video))
-            print(f"pos {_range}: {pos_inicio} -> {pos_fin}({num_ceros})")
             
+            for _pos in range(pos_inicio, pos_fin):
+                missing_samples.append(_pos)
+        
+    else:
+        
+        config = dataset_info[dataset_name]
+
+        block_limit = [np.percentile(np.random.normal(config.get('mean_consecutive_missing', None),
+                                                    config.get('std_consecutive_missing', None),
+                                                    config.get('samples', None)), p) for p in [25, 75]]
+
+        num_blocks_min = math.floor(block_limit[0])
+        num_blocks_max = math.ceil(block_limit[1])
+
+        num_blocks_min = max(num_blocks_min, 1)
+        num_blocks = random.randint(num_blocks_min, num_blocks_max)
+
+        section_size = max(1, len(video) // num_blocks)
+        rest = len(video) % num_blocks
+
+        block_size = [np.percentile(np.random.normal(config.get('mean_number_missing_blocks', None),
+                                                    config.get('std_number_missing_blocks', None),
+                                                    config.get('samples', None)), p) for p in [25, 75]]
+
+        block_size_min = math.floor(block_size[0])
+        block_size_max = math.ceil(block_size[1])
+
+        block_size_min = max(block_size_min, 1)
+        #print(f"|- blocks: {num_blocks}, block size: {block_size}, rest: {rest}")
+
+        if section_size < block_size_max:
+            section_size = max(block_size_max + 4, 1)
+            num_blocks = max(1, len(video) // section_size)
+            rest = len(video) % num_blocks
+            #print(f"#-Now: sect size -> {section_size}, block size -> {num_blocks}, rest: {rest}")
+
+        missing_samples = []
+
+
+        for _range in range(num_blocks):
+            num_ceros = random.randint(block_size_min, block_size_max)
+            num_ceros = min(num_ceros, section_size)
+
+            _rest = rest if _range == (num_blocks - 1) else 0
+            offset = random.randint(0, min(0, _rest + section_size - num_ceros))
+
+            pos_inicio = section_size * _range + offset
+            pos_fin = min(pos_inicio + num_ceros, len(video))
+
             for _pos in range(pos_inicio, pos_fin):
                 missing_samples.append(_pos)
 
@@ -462,16 +518,19 @@ class LSP_Dataset(Dataset):
         :param dataset_filename: Path to the h5 file
         :param transform: Any data transformation to be applied (default: None)
         """
+        
+        self.dataset_filename = dataset_filename
+        self.dataset_name = dataset_filename.split("--")[-1].split(".")[0]
         print("*"*20)
         print("*"*20)
         print("*"*20)
         print('Use keypoint model : ',keypoints_model) 
         logging.info('Use keypoint model : '+str(keypoints_model))
-
+        
         video_dataset, body_section, body_part = get_dataset_from_hdf5(path=dataset_filename,
-                                                                        keypoints_model=keypoints_model,
-                                                                        landmarks_ref=landmarks_ref,
-                                                                        keypoints_number = keypoints_number)
+                                                                       keypoints_model=keypoints_model,
+                                                                       landmarks_ref=landmarks_ref,
+                                                                       keypoints_number = keypoints_number)
         
         self.body_parts_class = bodyKeypointMap(body_section, body_part)
         
@@ -533,7 +592,7 @@ class LSP_Dataset(Dataset):
         #depth_map_missing, mask = put_missing_values(depth_map.clone(), self.body_parts_class)
         
         # Missing frames
-        depth_map_missing, mask = put_missing_frames(depth_map.clone().detach(), self.is_random_missing)
+        depth_map_missing, mask = put_missing_frames(depth_map.clone().detach(), self.is_random_missing, self.dataset_name)
 
         # add SOS in the data and mask
         depth_map_missing, mask = add_sos_eos(depth_map_missing, mask)
@@ -542,6 +601,7 @@ class LSP_Dataset(Dataset):
         # shift to errase the last keypoint group
         depth_map_missing, mask = delete_last_sequence(depth_map_missing, mask)
 
+        #print(idx, depth_map_missing.shape, depth_map.shape, mask.shape)
         return depth_map_missing, depth_map, mask
 
     def __len__(self):
