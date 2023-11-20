@@ -1,0 +1,30 @@
+{
+    "AUTSL": {
+        "hdf5_file": "../PeruvianSignLanguage/Data/AUTSL/AUTSL--mediapipe.hdf5",
+        "csv_file": "../missingValueAnalisys/AUTSL_without_missing_values.csv",
+        "mean_consecutive_missing": 5.28,
+        "std_consecutive_missing": 4.15,
+        "samples": 491,
+        "mean_number_missing_blocks":4.18,
+        "std_number_missing_blocks":1.78
+    },
+    "AEC": {
+        "hdf5_file": "../PeruvianSignLanguage/Data/AEC/AEC--mediapipe.hdf5",
+        "csv_file": "../missingValueAnalisys/AEC_without_missing_values.csv",
+        "mean_consecutive_missing": 3.25,
+        "std_consecutive_missing": 3.09,
+        "samples":267,
+        "mean_number_missing_blocks":1.92,
+        "std_number_missing_blocks":1.1
+    },
+    "PUCP_PSL_DGI305": {
+        "hdf5_file": "../PeruvianSignLanguage/Data/PUCP_PSL_DGI305/PUCP_PSL_DGI305--mediapipe.hdf5",
+        "csv_file": "../missingValueAnalisys/PUCP_PSL_DGI305_without_missing_values.csv",
+        "mean_consecutive_missing": 4.04,
+        "std_consecutive_missing": 5.63,
+        "samples":185,
+        "mean_number_missing_blocks":1.66,
+        "std_number_missing_blocks":1.11
+    }
+}
+  
