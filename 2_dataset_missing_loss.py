@@ -28,7 +28,7 @@ def replace_frame_with_zeros(inputs, mask):
 
 def main():
     
-    to_process = "AEC" #AEC #PUCP_PSL_DGI305 #AUTSL
+    to_process = "PUCP_PSL_DGI305" #AEC #PUCP_PSL_DGI305 #AUTSL
     dataset_info = load_configuration("dataset_config")
 
     g = torch.Generator()
@@ -61,7 +61,8 @@ def main():
     plt.title('Histogram of loss - Cubic')
     plt.xlabel('Loss')
     plt.ylabel('Frequence')
-    plt.savefig(f'initial_loss_{to_process}.jpg')
+    plt.savefig(f'results/initial_loss_{to_process}.jpg')
     plt.legend(['Datos'])
+
     
 main()

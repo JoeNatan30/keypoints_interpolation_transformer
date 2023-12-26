@@ -14,6 +14,7 @@ import dataloader
 import augmentation
 
 from euclidean_loss import EuclideanLoss
+from scipy.stats import f_oneway, ttest_ind, tukey_hsd
 
 import parseMain
 import numpy as np
@@ -50,32 +51,63 @@ def lr_lambda(current_step, lr, optim):
 
     return optim
 
-def sent_histogram(loss_original, loss_collector, to_process):
+def cubic_interpolation(data, mask):
+    data_copy = data.clone().detach().permute(1, 2, 0)
+    interpolated_data = torch.empty_like(data_copy)
+    #print(data_copy.shape, mask.shape)
+
+    for _pos, _val in enumerate(mask[0][0]):
+ 
+        if _val == 1:
+            #print(data_copy.shape, _pos)
+            data_copy[:,:,_pos] = torch.zeros(data_copy[:,:,_pos].shape)
+
+    for kp_pos in np.arange(0, data_copy.shape[0]):
+        
+        x = data_copy[kp_pos][0]
+        y = data_copy[kp_pos][1]
+
+        df = pd.DataFrame({'x': x, 'y': y})
+        df['time'] = np.arange(len(df))
+
+        df['x'] = df['x'].replace(0, np.nan).interpolate(method='cubic', limit_direction='both', limit_area='inside')
+        df['y'] = df['y'].replace(0, np.nan).interpolate(method='cubic', limit_direction='both', limit_area='inside')
+        
+        df['x'] = df['x'].replace(np.nan, 0)
+        df['y'] = df['y'].replace(np.nan, 0)
+        
+        interpolated_data[kp_pos][0] = torch.from_numpy(np.nan_to_num(df['x'].values))
+        interpolated_data[kp_pos][1] = torch.from_numpy(np.nan_to_num(df['y'].values))
+
+    return interpolated_data.permute(2, 0, 1)
+
+def sent_histogram(loss_baseline_acum, loss_collector_acum, to_process):
     
+    all_losses = [loss_baseline_acum, loss_collector_acum]
     # Crear un histograma conjunto para comparar las distribuciones
     plt.figure(figsize=(12, 8))
 
     # Definir rangos de bins para ambos conjuntos de datos
-    bins = np.histogram_bin_edges(np.concatenate([loss_original, loss_collector]), bins=24)
+    bins = np.histogram_bin_edges(np.concatenate([loss_baseline_acum, loss_collector_acum]), bins=24)
 
     #plt.style.use('seaborn-darkgrid')
     # Dibujar histogramas con bordes y colores específicos
-    plt.hist(loss_original, bins=bins, alpha=0.7, label='Original Loss', color='skyblue', edgecolor='black')
-    plt.hist(loss_collector, bins=bins, alpha=0.7, label='Interpolation Loss', color='orange', edgecolor='black')
+    plt.hist(loss_baseline_acum, bins=bins, alpha=0.7, label='Original Loss', color='skyblue', edgecolor='black')
+    plt.hist(loss_collector_acum, bins=bins, alpha=0.7, label='Interpolation Loss', color='orange', edgecolor='black')
 
     # Agregar líneas de cuadrícula y cambiar el estilo de la cuadrícula
     plt.grid(axis='y', linestyle='--', alpha=0.5)
 
     # Agregar líneas verticales para resaltar la media y cuartiles
-    plt.axvline(x=np.mean(loss_original), color='blue', linestyle='dashed', linewidth=3, label='Mean Original Loss')
-    plt.axvline(x=np.mean(loss_collector), color='red', linestyle='dashed', linewidth=3, label='Mean Interpolation Loss')
+    plt.axvline(x=np.mean(loss_baseline_acum), color='blue', linestyle='dashed', linewidth=3, label='Mean Original Loss')
+    plt.axvline(x=np.mean(loss_collector_acum), color='red', linestyle='dashed', linewidth=3, label='Mean Interpolation Loss')
 
     # Resaltar los cuartiles con líneas adicionales
-    plt.axvline(x=np.percentile(loss_original, 25), color='blue', linestyle='dashed', linewidth=1, label='Q1 Original Loss')
-    plt.axvline(x=np.percentile(loss_collector, 25), color='red', linestyle='dashed', linewidth=1, label='Q1 Interpolation Loss')
+    plt.axvline(x=np.percentile(loss_baseline_acum, 25), color='blue', linestyle='dashed', linewidth=1, label='Q1 Original Loss')
+    plt.axvline(x=np.percentile(loss_collector_acum, 25), color='red', linestyle='dashed', linewidth=1, label='Q1 Interpolation Loss')
 
-    plt.axvline(x=np.percentile(loss_original, 75), color='blue', linestyle='dashed', linewidth=1, label='Q3 Original Loss')
-    plt.axvline(x=np.percentile(loss_collector, 75), color='red', linestyle='dashed', linewidth=1, label='Q3 Interpolation Loss')
+    plt.axvline(x=np.percentile(loss_baseline_acum, 75), color='blue', linestyle='dashed', linewidth=1, label='Q3 Original Loss')
+    plt.axvline(x=np.percentile(loss_collector_acum, 75), color='red', linestyle='dashed', linewidth=1, label='Q3 Interpolation Loss')
 
     # Cambiar el estilo de la leyenda para mayor claridad
     plt.legend(loc='upper right', fontsize='small')
@@ -87,13 +119,32 @@ def sent_histogram(loss_original, loss_collector, to_process):
 
     plt.tight_layout()  # Ajustar el diseño automáticamente para evitar superposiciones
 
-    plt.savefig(f'IA_histogram_{to_process}.jpg')
-    wandb.log({"IA_histogram": [wandb.Image(f"IA_histogram_{to_process}.jpg", caption="histogram - Interpolaion IA")]})
+    plt.savefig(f'results/IA_histogram_{to_process}.jpg')
+    wandb.log({"IA_histogram": [wandb.Image(f"results/IA_histogram_{to_process}.jpg", caption="histogram - Interpolaion IA")]})
 
+    # Realiza el análisis de varianza (ANOVA)
+    f_stat, p_value = f_oneway(*all_losses)
+    
+    # Imprime los resultados
+    print(f"F-statistic: {f_stat}, p-value: {p_value}")
+
+    # Compara con un nivel de significancia (por ejemplo, 0.05)
+    if p_value < 0.05:
+        print("Hay diferencias significativas entre al menos dos grupos.")
+    else:
+        print("No hay diferencias significativas entre los grupos.")
+    
+    # Realiza la prueba de Tukey como prueba post hoc
+    tukey_results = tukey_hsd(*all_losses)
+    print(tukey_results)
+    
+    # Realiza la prueba t de Student
+    t_stat, p_value = ttest_ind(*all_losses)
+    print(f"T-statistic: {t_stat}, p-value: {p_value}")
 
 def sent_test_result(model, inputs, mask, device):
 
-    tgt_mask = model.get_tgt_mask(len(inputs)).to(device)
+    tgt_mask = model.get_tgt_mask(mask, len(inputs)).to(device)
 
     pred = model(inputs, inputs, decoder_mask=mask, tgt_mask=tgt_mask)
 
@@ -182,12 +233,12 @@ def train_epoch(model, dataloader, criterion, optimizer, device):
         
         # Use Batch
         if len(inputs.shape) != 3: # is 4 if you are using batch
-            tgt_mask = model.get_tgt_mask(inputs.shape[1]).to(device)
+            tgt_mask = model.get_tgt_mask(mask, inputs.shape[1]).to(device)
             prediction = model(inputs, sota[:,:-1,:,:], coder_mask=mask, tgt_mask=tgt_mask)
             loss = criterion(prediction, sota[:,1:,:,:])
         # No use Batch
         else:
-            tgt_mask = model.get_tgt_mask(inputs.shape[0]).to(device)
+            tgt_mask = model.get_tgt_mask(mask, inputs.shape[0]).to(device)
             prediction = model(inputs, sota[:-1,:,:], coder_mask=mask, tgt_mask=tgt_mask)
             loss = criterion(prediction, sota[1:,:,:])
 
@@ -208,8 +259,8 @@ def eval_epoch(model, dataloader, criterion, body_parts_class, dataset_name, dev
 
     data_length = len(dataloader)
     
-    loss_collector = []
-    loss_original = []
+    loss_collector_acum = []
+    loss_baseline_acum = []
 
     for i, data in enumerate(dataloader):
 
@@ -228,12 +279,13 @@ def eval_epoch(model, dataloader, criterion, body_parts_class, dataset_name, dev
         #    loss = criterion(prediction, sota[:,1:,:,:])
         # No use Batch
         #else:
-        tgt_mask = model.get_tgt_mask(inputs.shape[0]).to(device)
+        tgt_mask = model.get_tgt_mask(mask, inputs.shape[0]).to(device)
         prediction = model(inputs, sota[:-1,:,:], coder_mask=mask, tgt_mask=tgt_mask)
         loss = criterion(prediction[:-1,:,:], sota[1:-1,:,:])
-        original_loss = criterion(inputs[1:,:,:], sota[1:-1,:,:])
-        loss_collector.append(loss.clone().detach().cpu().numpy())
-        loss_original.append(original_loss.clone().detach().cpu().numpy())
+        baseline_loss = criterion(inputs[1:,:,:], sota[1:-1,:,:])
+        
+        loss_collector_acum.append(loss.clone().detach().cpu().numpy())
+        loss_baseline_acum.append(baseline_loss.clone().detach().cpu().numpy())
 
         loss = loss.float()    
         running_loss += loss
@@ -251,7 +303,7 @@ def eval_epoch(model, dataloader, criterion, body_parts_class, dataset_name, dev
                 sent_test_result(model, inputs, mask, device)
     
     
-    sent_histogram(loss_original, loss_collector, dataset_name)
+    sent_histogram(loss_baseline_acum, loss_collector_acum, dataset_name)
                 
 
     return running_loss/data_length
@@ -268,6 +320,7 @@ def train(args):
     #transform = transforms.Compose([GaussianNoise(args.gaussian_mean, args.gaussian_std)])
     train_set = dataloader.LSP_Dataset(args.training_set_path,
                                        have_aumentation=True,
+                                       is_train=True,
                                        keypoints_model='mediapipe',
                                        is_random_missing=False)
 
@@ -275,15 +328,16 @@ def train(args):
 
     val_set = dataloader.LSP_Dataset(args.validation_set_path,
                                         keypoints_model='mediapipe',
+                                        is_train=False,
                                         have_aumentation=False,
                                         is_random_missing=False)
 
-    train_loader = DataLoader(train_set, shuffle=True, batch_size=1, generator=g)
-    val_loader = DataLoader(val_set, shuffle=False, batch_size=1, generator=g)
+    train_loader = DataLoader(train_set, shuffle=True, batch_size=1,  generator=g)
+    val_loader = DataLoader(val_set, shuffle=False, batch_size=1,  generator=g)
     
     keysecom_model = model.KeypointCompleter(input_size=54*2, hidden_dim=128, num_layers=6)
     wandb.watch(keysecom_model)
-    criterion = EuclideanLoss()#MSELoss()
+    criterion = MSELoss()#EuclideanLoss()#MSELoss()
     optimizer = Adam(keysecom_model.parameters(), lr=0.0001)
 
     keysecom_model.train(True)
@@ -321,6 +375,7 @@ if __name__ == '__main__':
                      entity=ENTITY,
                      config=args,
                      name=args.experiment_name,
+                     mode="offline",
                      job_type="model-training",
                      tags=TAG)
 

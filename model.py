@@ -180,12 +180,18 @@ class KeypointCompleter(nn.Module):
     
         return decoded
 
-    def get_tgt_mask(self, size) -> torch.tensor:
+    def get_tgt_mask(self, mask, size) -> torch.tensor:
+
+        matrix_mask = mask.clone().repeat(1, len(mask[0]), 1)
+        matrix_mask = matrix_mask.squeeze()
+        
+        matrix_mask = torch.where(matrix_mask == 1, torch.tensor(float('-inf')), matrix_mask)
+
         # Generates a squeare matrix where the each row allows one word more to be seen
-        mask = torch.tril(torch.ones(size, size) == 1) # Lower triangular matrix
-        mask = mask.float()
-        mask = mask.masked_fill(mask == 0, float('-inf')) # Convert zeros to -inf
-        mask = mask.masked_fill(mask == 1, float(0.0)) # Convert ones to 0
+        #mask = torch.tril(torch.ones(size, size) == 1) # Lower triangular matrix
+        #mask = mask.float()
+        #mask = mask.masked_fill(mask == 0, float('-inf')) # Convert zeros to -inf
+        #mask = mask.masked_fill(mask == 1, float(0.0)) # Convert ones to 0
         
         # EX for size=5:
         # [[0., -inf, -inf, -inf, -inf],
@@ -194,4 +200,4 @@ class KeypointCompleter(nn.Module):
         #  [0.,   0.,   0.,   0., -inf],
         #  [0.,   0.,   0.,   0.,   0.]]
         
-        return mask
+        return matrix_mask

@@ -323,7 +323,17 @@ def put_missing_frames(video, is_random_missing, dataset_name):
 
         # we chose randomly the number of frames you desire
         missing_samples = random.choices(range(video.shape[0]), k=missing_amount)
+        
+        mask = torch.zeros([video.shape[0]])
 
+        for r, pos in enumerate(missing_samples):
+
+            video[pos] = torch.zeros(video[pos].shape)
+            mask[pos] = 1
+    
+        return video, mask
+
+    # For a mix of dataset or all dataset at once
     elif dataset_name == 'all':
         
         num_blocks = random.randint(4, 7)
@@ -346,66 +356,82 @@ def put_missing_frames(video, is_random_missing, dataset_name):
             offset = random.randint(0, min(0, _rest + section_size - num_ceros))
                                     
             pos_inicio = section_size * _range + offset
-            pos_fin = min(pos_inicio + num_ceros, len(video))
+            pos_fin = min(pos_inicio + num_ceros, len(video)-1)
             
-            for _pos in range(pos_inicio, pos_fin):
-                missing_samples.append(_pos)
-        
+            missing_samples.append((pos_inicio, pos_fin))
+    
+    # For each dataset
     else:
         
         config = dataset_info[dataset_name]
 
+        # Calculate limits for the number of consecutive missing blocks in the video
         block_limit = [np.percentile(np.random.normal(config.get('mean_consecutive_missing', None),
                                                     config.get('std_consecutive_missing', None),
                                                     config.get('samples', None)), p) for p in [25, 75]]
 
-        num_blocks_min = math.floor(block_limit[0])
-        num_blocks_max = math.ceil(block_limit[1])
-
-        num_blocks_min = max(num_blocks_min, 1)
-        num_blocks = random.randint(num_blocks_min, num_blocks_max)
-
-        section_size = max(1, len(video) // num_blocks)
-        rest = len(video) % num_blocks
-
+        # Calculate the size of missing blocks
         block_size = [np.percentile(np.random.normal(config.get('mean_number_missing_blocks', None),
                                                     config.get('std_number_missing_blocks', None),
                                                     config.get('samples', None)), p) for p in [25, 75]]
 
+        # Calculate the minimum and maximum number of missing blocks
+        num_blocks_min = math.floor(block_limit[0])
+        num_blocks_max = math.ceil(block_limit[1])
+        # Calculate the minimum and maximum size of missing blocks
         block_size_min = math.floor(block_size[0])
         block_size_max = math.ceil(block_size[1])
 
+        # To ensure it has a positive value
+        num_blocks_min = max(num_blocks_min, 1)
         block_size_min = max(block_size_min, 1)
-        #print(f"|- blocks: {num_blocks}, block size: {block_size}, rest: {rest}")
+        
+        # Generate the number of blocks and its size
+        num_blocks = random.randint(num_blocks_min, num_blocks_max)
+        section_size = max(1, len(video) // num_blocks)
+        rest = len(video) % num_blocks
 
-        if section_size < block_size_max:
+        #print(f"|- blocks: {num_blocks}, block size: {block_size}, max block size:{section_size} rest: {rest}")
+        
+        # Adjust section_size and the number of blocks if necessary
+        if section_size < block_size_max + 4:
             section_size = max(block_size_max + 4, 1)
             num_blocks = max(1, len(video) // section_size)
             rest = len(video) % num_blocks
             #print(f"#-Now: sect size -> {section_size}, block size -> {num_blocks}, rest: {rest}")
 
+        # Initialize a list to store positions of missing samples
         missing_samples = []
 
-
+        # Generate random positions for missing blocks
         for _range in range(num_blocks):
+            
+            # Generate the number of block size
             num_ceros = random.randint(block_size_min, block_size_max)
             num_ceros = min(num_ceros, section_size)
 
             _rest = rest if _range == (num_blocks - 1) else 0
-            offset = random.randint(0, min(0, _rest + section_size - num_ceros))
+            offset = random.randint(0, _rest + section_size - num_ceros)
 
             pos_inicio = section_size * _range + offset
-            pos_fin = min(pos_inicio + num_ceros, len(video))
+            pos_fin = min(pos_inicio + num_ceros, len(video)-1)
 
-            for _pos in range(pos_inicio, pos_fin):
-                missing_samples.append(_pos)
+            missing_samples.append((pos_inicio, pos_fin))
 
     mask = torch.zeros([video.shape[0]])
+    
+    # Fill in the missing blocks in the video and create the corresponding mask
+    for pos, (_init, _end) in enumerate(missing_samples):
+        
+        if pos == 0:
+            kp_ref = _end
+        else:
+            kp_ref = _init - 1
 
-    for r, pos in enumerate(missing_samples):
-
-        video[pos] = torch.zeros(video[pos].shape)
-        mask[pos] = 1
+        #print(len(video), _init, _end)
+        for pos in range(_init, _end):
+            video[pos] = video[kp_ref]
+            mask[pos] = 1
 
     return video, mask
 
@@ -511,7 +537,7 @@ class LSP_Dataset(Dataset):
 
     def __init__(self, dataset_filename: str,keypoints_model:str,  transform=None, have_aumentation=True,
                  augmentations_prob=0.5, normalize=False,landmarks_ref= 'Mapeo landmarks librerias.csv',
-                 keypoints_number = 54, hidden_dim=None, is_random_missing=False):
+                 keypoints_number = 54, hidden_dim=None, is_random_missing=False, is_train=True):
         """
         Initiates the HPOESDataset with the pre-loaded data from the h5 file.
 
@@ -539,7 +565,6 @@ class LSP_Dataset(Dataset):
 
         viedo_dataset = filter_videos(video_dataset, self.body_parts_class)
 
-        
         self.transform = transform
 
         self.hidden_dim = hidden_dim
@@ -552,11 +577,12 @@ class LSP_Dataset(Dataset):
 
         # missing value way to add 
         self.is_random_missing = is_random_missing
+        self.is_train = is_train
 
         # CREATE CHUNKS
         #video_dataset = create_chunks(viedo_dataset)
         self.data = video_dataset
-
+        self.current_data_idx = 0
 
     def __getitem__(self, idx):
         """
@@ -565,8 +591,15 @@ class LSP_Dataset(Dataset):
         :param idx: Index of the item
         :return: Tuple containing both the depth map and the label
         """
-        depth_map = torch.from_numpy(self.data[idx])
-
+        if self.is_train:
+            # During training, allow random index selection
+            depth_map = torch.from_numpy(self.data[idx])
+        else:
+            # During validation, use the next index in order
+            idx = self.current_data_idx
+            depth_map = torch.from_numpy(self.data[idx])
+            self.current_data_idx = (self.current_data_idx + 1) % len(self.data)
+            
         # Apply potential augmentations
         if self.have_aumentation and random.random() < self.augmentations_prob:
 
