@@ -628,11 +628,11 @@ class LSP_Dataset(Dataset):
         depth_map_missing, mask = put_missing_frames(depth_map.clone().detach(), self.is_random_missing, self.dataset_name)
 
         # add SOS in the data and mask
-        depth_map_missing, mask = add_sos_eos(depth_map_missing, mask)
-        depth_map, _ = add_sos_eos(depth_map)
+        #depth_map_missing, mask = add_sos_eos(depth_map_missing, mask)
+        #depth_map, _ = add_sos_eos(depth_map)
 
         # shift to errase the last keypoint group
-        depth_map_missing, mask = delete_last_sequence(depth_map_missing, mask)
+        #depth_map_missing, mask = delete_last_sequence(depth_map_missing, mask)
 
         #print(idx, depth_map_missing.shape, depth_map.shape, mask.shape)
         return depth_map_missing, depth_map, mask

@@ -75,7 +75,7 @@ def got_h5_data(path_list, info_dict, idx_keypoints):
 
 def main():
     
-    to_process = "PUCP_PSL_DGI305"
+    to_process = "AUTSL"
     
     dataset_info = load_configuration("dataset_config")#pd.read_csv('./dataset_info.csv', encoding='utf-8')
     

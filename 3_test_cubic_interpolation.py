@@ -33,43 +33,41 @@ def cubic_interpolation(data, mask):
     data_copy = data.clone().detach().permute(1, 2, 0)
     interpolated_data = torch.empty_like(data_copy)
     #print(data_copy.shape, mask.shape)
-
-    for _pos, _val in enumerate(mask[0][0]):
+    for _pos, _value in enumerate(mask[0]):
  
-        if _val == 1:
+        if _value == 1:
             #print(data_copy.shape, _pos)
             data_copy[:,:,_pos] = torch.zeros(data_copy[:,:,_pos].shape)
-
-    for kp_pos in np.arange(0, data_copy.shape[0]):
-        
+    
+    for kp_pos in range(data_copy.shape[0]):
         x = data_copy[kp_pos][0]
         y = data_copy[kp_pos][1]
 
         df = pd.DataFrame({'x': x, 'y': y})
         df['time'] = np.arange(len(df))
 
-        df['x'] = df['x'].replace(0, np.nan).interpolate(method='cubic', limit_direction='both', limit_area='inside')
-        df['y'] = df['y'].replace(0, np.nan).interpolate(method='cubic', limit_direction='both', limit_area='inside')
-        
-        df['x'] = df['x'].replace(np.nan, 0)
-        df['y'] = df['y'].replace(np.nan, 0)
-        
+        # Interpola incluso si los primeros valores son NaN
+        df['x'] = df['x'].replace(0, np.nan).interpolate(method='cubicspline', limit_direction='both', limit_area=None)
+        df['y'] = df['y'].replace(0, np.nan).interpolate(method='cubicspline', limit_direction='both', limit_area=None)
+        # df['x'] = df['x'].replace(0, np.nan).interpolate(method='cubicspline', limit_direction='backward', limit_area='outside')
+        # df['y'] = df['y'].replace(0, np.nan).interpolate(method='cubicspline', limit_direction='backward', limit_area='outside')
+
         interpolated_data[kp_pos][0] = torch.from_numpy(np.nan_to_num(df['x'].values))
         interpolated_data[kp_pos][1] = torch.from_numpy(np.nan_to_num(df['y'].values))
-
+    
     return interpolated_data.permute(2, 0, 1)
 
 
 def main():
     
-    to_process = "AUTSL" #AEC #PUCP_PSL_DGI305 #AUTSL
+    to_process = "AEC" #AEC #PUCP_PSL_DGI305 #AUTSL
     dataset_info = load_configuration("dataset_config")
 
     g = torch.Generator()
     g.manual_seed(42)
-    criterion = MSELoss()
+    #criterion = MSELoss()
     #criterion = SmoothL1Loss(beta=5.0)
-    #criterion = EuclideanLoss()
+    criterion = EuclideanLoss()
 
     val_set = dataloader.LSP_Dataset(f'data/validation--{to_process}.hdf5', have_aumentation=False, keypoints_model='mediapipe',is_random_missing=False)
 
@@ -87,11 +85,11 @@ def main():
         #    mask = mask.squeeze(0).float()
         #print(mask)
         #inputs = replace_frame_with_zeros(inputs, mask)
-        baseline_loss = criterion(inputs[1:,:,:], sota[1:-1,:,:])
+        baseline_loss = criterion(inputs, sota)
         #print(mask)
-        prediction = cubic_interpolation(inputs[1:,:,:], mask[:,:,1:])
+        prediction = cubic_interpolation(inputs, mask)
 
-        loss = criterion(prediction, sota[1:-1,:,:])
+        loss = criterion(prediction, sota)
 
         #print("pred:",prediction[0])
         #print("sota:",sota[1:,:,:][0])

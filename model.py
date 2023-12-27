@@ -21,7 +21,7 @@ class SPOTERTransformerDecoderLayer(nn.TransformerDecoderLayer):
 
         del self.self_attn
 
-    def forward(self, tgt: torch.Tensor, memory: torch.Tensor, tgt_mask: Optional[torch.Tensor] = None,
+    def forward(self, tgt: torch.Tensor, memory: torch.Tensor, src_mask: Optional[torch.Tensor] = None,
                 memory_mask: Optional[torch.Tensor] = None, tgt_key_padding_mask: Optional[torch.Tensor] = None,
                 memory_key_padding_mask: Optional[torch.Tensor] = None) -> torch.Tensor:
 
@@ -126,7 +126,7 @@ class KeypointCompleter(nn.Module):
         # FINAL LAYER (LINEAR)
         self.fc = nn.Linear(hidden_dim, input_size)
 
-    def forward(self, inputs, trueInput=None, coder_mask=None, decoder_mask=None, tgt_mask=None):
+    def forward(self, inputs, trueInput=None, coder_mask=None, decoder_mask=None, src_mask=None):
 
         # Use Batch
         if len(inputs.shape) != 3:
@@ -151,16 +151,17 @@ class KeypointCompleter(nn.Module):
         o = self.embedding(o)
         o = self.positional_encoder(o)
 
-        if coder_mask==None:
-            if decoder_mask==None:
-                h = self.transformer(h, o, tgt_mask=tgt_mask).transpose(0, 1)
-            else:
-                h = self.transformer(h, o, tgt_key_padding_mask=decoder_mask, tgt_mask=tgt_mask).transpose(0, 1)
+        #if coder_mask==None:
+        #    if decoder_mask==None:
+        #        h = self.transformer(h, o, src_mask=src_mask).transpose(0, 1)
+        #    else:
+        #        h = self.transformer(h, o, tgt_key_padding_mask=decoder_mask, src_mask=src_mask).transpose(0, 1)
             
-        else:
-            # the reason of use of src_key_padding_mask is here: https://discuss.pytorch.org/t/transformer-difference-between-src-mask-and-src-key-padding-mask/84024
-            h = self.transformer(h, o, src_key_padding_mask=coder_mask, tgt_mask=tgt_mask).transpose(0, 1)
-        
+        #else:
+        # the reason of use of src_key_padding_mask is here: https://discuss.pytorch.org/t/transformer-difference-between-src-mask-and-src-key-padding-mask/84024
+        # key_padding_mask is used to ignore certain position in the timestep to avoid the model cheating
+        # in this case, in the "src" is used to "cheat" because this work is interpolation and not prediction 
+        h = self.transformer(h, o, src_key_padding_mask=coder_mask, tgt_key_padding_mask=decoder_mask, src_mask=src_mask).transpose(0, 1)
 
         decoded = self.fc(h)
     
@@ -180,12 +181,15 @@ class KeypointCompleter(nn.Module):
     
         return decoded
 
-    def get_tgt_mask(self, mask, size) -> torch.tensor:
+    def get_src_mask(self, mask, size) -> torch.tensor:
 
-        matrix_mask = mask.clone().repeat(1, len(mask[0]), 1)
+        matrix_mask = mask.clone().repeat(1, size, 1)
         matrix_mask = matrix_mask.squeeze()
         
         matrix_mask = torch.where(matrix_mask == 1, torch.tensor(float('-inf')), matrix_mask)
+        for i in range(size):
+            for j in range(i + 1):
+                matrix_mask[i, j] = 0.0
 
         # Generates a squeare matrix where the each row allows one word more to be seen
         #mask = torch.tril(torch.ones(size, size) == 1) # Lower triangular matrix

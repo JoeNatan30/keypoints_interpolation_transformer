@@ -18,5 +18,5 @@ class EuclideanLoss(nn.Module):
         _target = torch.stack([target_x, target_y], dim=1)
 
         distancias = torch.norm(_output - _target, dim=1)
-
+        # distancias = torch.sum(torch.abs(_output - _target), dim=1) # Manhattan distance
         return torch.sum(distancias)

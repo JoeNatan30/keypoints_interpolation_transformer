@@ -28,7 +28,7 @@ def replace_frame_with_zeros(inputs, mask):
 
 def main():
     
-    to_process = "PUCP_PSL_DGI305" #AEC #PUCP_PSL_DGI305 #AUTSL
+    to_process = "AEC" #AEC #PUCP_PSL_DGI305 #AUTSL
     dataset_info = load_configuration("dataset_config")
 
     g = torch.Generator()
@@ -46,7 +46,7 @@ def main():
         inputs = inputs.squeeze(0).float()
         sota = sota.squeeze(0).float()
 
-        loss = criterion(inputs[1:,:,:], sota[1:-1,:,:])
+        loss = criterion(inputs, sota)
 
         #print("pred:",prediction[0])
         #print("sota:",sota[1:,:,:][0])
