@@ -70,6 +70,7 @@ import math
 import torch
 import torch.nn as nn
 import torch.optim as optim
+import torch.nn.functional as F
 
 class PositionalEncoding(nn.Module):
     def __init__(self, dim_model, dropout_p, max_len):
@@ -99,6 +100,14 @@ class PositionalEncoding(nn.Module):
         # Residual connection + pos encoding
         return self.dropout(token_embedding + self.pos_encoding[:token_embedding.size(0), :])
 
+
+def calculate_intermediate_loss(outputs, target):
+    # Puedes personalizar cómo deseas calcular el loss intermedio
+    # En este ejemplo, simplemente se usa F.mse_loss como referencia
+    loss = sum(F.mse_loss(output, target) for output in outputs)
+    return loss
+
+
 class KeypointCompleter(nn.Module):
     def __init__(self, input_size, hidden_dim, num_layers):
         super(KeypointCompleter, self).__init__()
@@ -122,7 +131,7 @@ class KeypointCompleter(nn.Module):
                                     nhead=8, 
                                     num_encoder_layers=num_layers, 
                                     num_decoder_layers=num_layers)
-
+        
         # FINAL LAYER (LINEAR)
         self.fc = nn.Linear(hidden_dim, input_size)
 
@@ -150,17 +159,38 @@ class KeypointCompleter(nn.Module):
 
         o = self.embedding(o)
         o = self.positional_encoder(o)
+        
+        '''
+        encoder_outputs = []
+        for layer in self.transformer.encoder.layers:
+            h_intermediate = layer.self_attn(h, h, h, attn_mask=src_mask, key_padding_mask=coder_mask)[0]
+            h_intermediate = self.fc(h_intermediate)
+            h_intermediate = h_intermediate.permute(0, 2, 1)
+            h_intermediate = h_intermediate.view(-1, 54, 2)
+            encoder_outputs.append(h_intermediate)
 
+        decoder_outputs = []
+        for layer in self.transformer.decoder.layers:
+            o_intermediate = layer.self_attn(o, o, o, attn_mask=src_mask, key_padding_mask=coder_mask)[0]
+            o_intermediate = self.fc(o_intermediate)
+            o_intermediate = o_intermediate.permute(0, 2, 1)
+            o_intermediate = o_intermediate.view(-1, 54, 2)
+            decoder_outputs.append(o_intermediate)
+
+        intermediate_loss_encoder = calculate_intermediate_loss(encoder_outputs, trueInput)
+        intermediate_loss_decoder = calculate_intermediate_loss(decoder_outputs, trueInput)
+        '''
+        intermediate_loss_encoder, intermediate_loss_decoder = torch.tensor(0.0), torch.tensor(0.0)
         #if coder_mask==None:
         #    if decoder_mask==None:
         #        h = self.transformer(h, o, src_mask=src_mask).transpose(0, 1)
         #    else:
         #        h = self.transformer(h, o, tgt_key_padding_mask=decoder_mask, src_mask=src_mask).transpose(0, 1)
-            
         #else:
         # the reason of use of src_key_padding_mask is here: https://discuss.pytorch.org/t/transformer-difference-between-src-mask-and-src-key-padding-mask/84024
         # key_padding_mask is used to ignore certain position in the timestep to avoid the model cheating
         # in this case, in the "src" is used to "cheat" because this work is interpolation and not prediction 
+        
         h = self.transformer(h, o, src_key_padding_mask=coder_mask, tgt_key_padding_mask=decoder_mask, src_mask=src_mask).transpose(0, 1)
 
         decoded = self.fc(h)
@@ -179,7 +209,8 @@ class KeypointCompleter(nn.Module):
 
         #decoded = self.fc(h)
     
-        return decoded
+        return decoded, intermediate_loss_encoder, intermediate_loss_decoder
+
 
     def get_src_mask(self, mask, size) -> torch.tensor:
 
@@ -187,6 +218,9 @@ class KeypointCompleter(nn.Module):
         matrix_mask = matrix_mask.squeeze()
         
         matrix_mask = torch.where(matrix_mask == 1, torch.tensor(float('-inf')), matrix_mask)
+        #matrix_mask = torch.where(matrix_mask == 1, torch.tensor(0.0), matrix_mask)
+        # To generate the triangle of 0.0
+ 
         for i in range(size):
             for j in range(i + 1):
                 matrix_mask[i, j] = 0.0

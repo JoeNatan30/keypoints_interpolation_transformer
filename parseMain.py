@@ -23,7 +23,7 @@ def get_default_args():
     parser.add_argument("--validation_set_path", type=str, default="", help="Path to the validation dataset CSV file")
 
     # Training hyperparameters
-    parser.add_argument("--epochs", type=int, default=100, help="Number of epochs to train the model for")
+    parser.add_argument("--epochs", type=int, default=500, help="Number of epochs to train the model for")
     parser.add_argument("--lr", type=float, default=0.00005, help="Learning rate for the model training")
 
     # Checkpointing
@@ -37,7 +37,7 @@ def get_default_args():
 
     # Gaussian noise normalization
     parser.add_argument("--gaussian_mean", type=int, default=0, help="Mean parameter for Gaussian noise layer")
-    parser.add_argument("--gaussian_std", type=int, default=0.001,
+    parser.add_argument("--gaussian_std", type=int, default=0.0005,
                         help="Standard deviation parameter for Gaussian noise layer")
 
     # Visualization

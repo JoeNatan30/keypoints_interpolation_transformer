@@ -479,12 +479,25 @@ def filter_videos(data, body_parts_class):
     print(f"The filer deletes {count} videos")
     return data
 
+def add_sos(video, mask=None):
+    _, Kp_size, coord_size = video.shape
+    sos = torch.ones(1, Kp_size, coord_size)  # tensor de unos
+    video = torch.cat((sos, video), dim=0)
+    
+    if mask!=None:
+    
+        mask = torch.cat((torch.zeros(1), mask))
+        return video, mask
+        #mask = mask.unsqueeze(0)
+    
+    return video
+    
 def add_sos_eos(video, mask=None):
 
     _, Kp_size, coord_size = video.shape
-    sos = torch.ones(1, Kp_size, coord_size)  # tensor de unos
-    
+    sos = torch.ones(1, Kp_size, coord_size)  # tensor de unos    
     eos = torch.zeros(1, Kp_size, coord_size-1)  # tensor de mitad ceros y mitad unos
+    
     eos = torch.cat((eos,sos[:,:,-1:].clone()), dim=2)
     
     video = torch.cat([sos, video, eos], dim=0)
@@ -498,7 +511,7 @@ def add_sos_eos(video, mask=None):
 def delete_last_sequence(video, mask):
 
     video = video[:-1,:,:]
-    mask = mask[:,:-1]
+    mask = mask[:-1]
 
     return video, mask
 
@@ -583,6 +596,27 @@ class LSP_Dataset(Dataset):
         #video_dataset = create_chunks(viedo_dataset)
         self.data = video_dataset
         self.current_data_idx = 0
+        
+        self.data_validation, self.validation_mask = self.create_validation_data(np.copy(video_dataset))
+
+    
+    def create_validation_data(self, data):
+        
+        depth_acum, mask_acum = [], []
+        
+        for i in range(len(data)):
+            
+            depth_map = torch.from_numpy(data[i])
+            
+            if self.transform:
+                depth_map = self.transform(depth_map)
+            
+            depth_map_missing, mask = put_missing_frames(depth_map.clone().detach(), self.is_random_missing, self.dataset_name)
+            
+            depth_acum.append(depth_map_missing)
+            mask_acum.append(mask)
+            
+        return depth_acum, mask_acum
 
     def __getitem__(self, idx):
         """
@@ -597,8 +631,18 @@ class LSP_Dataset(Dataset):
         else:
             # During validation, use the next index in order
             idx = self.current_data_idx
+            
             depth_map = torch.from_numpy(self.data[idx])
+            depth_map_missing = self.data_validation[idx]
+            mask = self.validation_mask[idx]
+
+            depth_map_missing, mask = put_missing_frames(depth_map.clone().detach(), self.is_random_missing, self.dataset_name)
+            #depth_map_missing, mask = delete_last_sequence(depth_map_missing, mask)
+            depth_map_missing, mask = add_sos(depth_map_missing, mask)
+
             self.current_data_idx = (self.current_data_idx + 1) % len(self.data)
+            
+            return depth_map_missing, depth_map, mask
             
         # Apply potential augmentations
         if self.have_aumentation and random.random() < self.augmentations_prob:
@@ -625,14 +669,18 @@ class LSP_Dataset(Dataset):
         #depth_map_missing, mask = put_missing_values(depth_map.clone(), self.body_parts_class)
         
         # Missing frames
+        
         depth_map_missing, mask = put_missing_frames(depth_map.clone().detach(), self.is_random_missing, self.dataset_name)
+  
+        depth_map_missing, mask = add_sos(depth_map_missing, mask)
+        #depth_map_missing, mask = delete_last_sequence(depth_map_missing, mask)
 
         # add SOS in the data and mask
         #depth_map_missing, mask = add_sos_eos(depth_map_missing, mask)
         #depth_map, _ = add_sos_eos(depth_map)
 
         # shift to errase the last keypoint group
-        #depth_map_missing, mask = delete_last_sequence(depth_map_missing, mask)
+        #
 
         #print(idx, depth_map_missing.shape, depth_map.shape, mask.shape)
         return depth_map_missing, depth_map, mask

@@ -5,7 +5,9 @@ import torch
 from torch.utils.data import DataLoader
 from torch.nn import MSELoss
 from torch.optim import Adam, RMSprop
+from torch.optim.lr_scheduler import LambdaLR
 #from spoter.gaussian_noise import GaussianNoise
+
 import matplotlib.pyplot as plt
 import os
 import wandb
@@ -37,7 +39,7 @@ TAG = ["paper"]
 
 connections = np.moveaxis(np.array(get_edges_index('54')), 0, 1)
 
-min_loss = 999999.9999
+
 loss_baseline_acum = []
 loss_cubic_acum = []
 
@@ -47,10 +49,9 @@ def lr_lambda(current_step, lr, optim):
     #    lr_rate = current_step/50000  # Función lineal
     #else:
     #    lr_rate = (0.00005/current_step) ** 0.5  # Función de raíz cuadrada inversa
+    lr_rate = lr[current_step]
 
-    lr_rate = lr
-
-    print(f'[{current_step}], Lr_rate: {lr_rate}')
+    
     for param_group in optim.param_groups:
         param_group['lr'] = lr_rate
 
@@ -98,7 +99,7 @@ def sent_histogram(loss_baseline_acum, loss_collector_acum, loss_cubic_acum, to_
     # Definir paleta de colores y estilos de línea
     colors = ['skyblue', 'orange', 'brown']
     line_styles = ['dashed', 'dashed', 'dashed']
-    labels = ['Baseline', "IA", "Cubic I."]
+    labels = ['Baseline', "IA", "Cubicspline"]
 
     # Crear un histograma conjunto para comparar las distribuciones
     plt.figure(figsize=figsize)
@@ -149,11 +150,15 @@ def sent_histogram(loss_baseline_acum, loss_collector_acum, loss_cubic_acum, to_
     
     print("\n0) Baseline")
     print("1) IA")
-    print("2) Cubic\n")
+    print("2) Cubicspline\n")
     # Realiza la prueba de Tukey como prueba post hoc
     tukey_results = tukey_hsd(*all_losses)
     print(tukey_results)
-    
+
+    # tukey_results = tukey_hsd(*all_losses, np.repeat(labels, len(loss_collector_acum)))
+    # for comparison, group_1_name, group_2_name, statistic, p_value, lower_ci, upper_ci in zip(tukey_results.groupsunique[comparison[0]], tukey_results.groupsunique[comparison[1]], tukey_results._results_table['meandiffs'], tukey_results._results_table['pvals'], tukey_results._results_table['lower'], tukey_results._results_table['upper']):
+        # print(f"{group_1_name} - {group_2_name}: Statistic={statistic:.3f}, p-value={p_value:.3f}, Lower CI={lower_ci:.3f}, Upper CI={upper_ci:.3f}")    #print(tukey_results)
+    #print(tukey_results)
     # Realiza la prueba t de Student
     #t_stat, p_value = ttest_ind(*all_losses)
     #print(f"T-statistic: {t_stat}, p-value: {p_value}")
@@ -232,9 +237,7 @@ def sent_validation_result(inputs, prediction, sota, connections, epoch):
 def train_epoch(model, dataloader, criterion, optimizer, device):
 
     model.train()
-    running_loss = 0.0
-
-    data_length = len(dataloader)
+    loss_collector_acum = []
 
     for i, data in enumerate(dataloader):
 
@@ -242,39 +245,41 @@ def train_epoch(model, dataloader, criterion, optimizer, device):
 
         inputs = inputs.squeeze(0).to(device).float()
         sota = sota.squeeze(0).to(device).float()
-        #print(mask.shape)
+
         #if mask!=None:
         #    mask = mask.squeeze(0).to(device).float()
-        #print(mask.shape)
-        criterion_mask = mask.clone().detach().permute(1, 0).unsqueeze(-1)
+        
+        criterion_mask = mask[:,1:].clone().detach().permute(1, 0).unsqueeze(-1)
         no_missing_mask = 1 - criterion_mask
+
         # Use Batch
-        if len(inputs.shape) != 3: # is 4 if you are using batch
-            src_mask = model.get_src_mask(mask, inputs.shape[1]).to(device)
-            prediction = model(inputs, sota, coder_mask=mask, src_mask=src_mask)
-            loss = criterion(prediction, sota)
+        #if len(inputs.shape) != 3: # is 4 if you are using batch
+            # src_mask = model.get_src_mask(mask[:,:-1], inputs[:-1,:,:].shape[1]).to(device)
+            # prediction = model(inputs[:-1,:,:], sota, coder_mask=mask, src_mask=src_mask) 
+            # loss = criterion(prediction, sota)
         # No use Batch
-        else:
-            src_mask = model.get_src_mask(mask, inputs.shape[0]).to(device)
-            prediction = model(inputs, sota, coder_mask=mask, src_mask=src_mask)
-            prediction = prediction * criterion_mask + inputs * no_missing_mask
-            loss = criterion(prediction, sota)
 
-        loss = loss.float()    
+        # else:
+        src_mask = model.get_src_mask(mask[:,:-1], inputs[:-1,:,:].shape[0]).to(device)
+        prediction, endocer_loss, decoder_loss = model(inputs[:-1,:,:], sota, coder_mask=1-mask[:,:-1], src_mask=src_mask) #TODO check coder_mask array values
 
+        prediction = prediction * criterion_mask + inputs[1:,:,:] * no_missing_mask
+        loss = criterion(prediction, sota)
+
+        loss = loss.float() + endocer_loss.float() * 0.5# + decoder_loss.float() * 0.5
+        loss_collector_acum.append(loss.clone().detach().cpu().numpy())
+        
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
 
-        running_loss += loss
+    return loss_collector_acum
 
-    return running_loss/data_length
-
-def eval_epoch(model, dataloader, criterion, body_parts_class, dataset_name, epoch, opt_lr_cont, device):
+def eval_epoch(model, dataloader, criterion, epoch, device):
 
     model.eval()
     #running_loss = 0.0
-
+    
     #data_length = len(dataloader)
     loss_collector_acum = []
 
@@ -286,7 +291,7 @@ def eval_epoch(model, dataloader, criterion, body_parts_class, dataset_name, epo
         #print("mask:",mask.shape)
         #if mask!=None:
         #    mask = mask.squeeze(0).to(device).float()
-        criterion_mask = mask.clone().detach().permute(1, 0).unsqueeze(-1)
+        criterion_mask = mask[:,1:].clone().detach().permute(1, 0).unsqueeze(-1)
         no_missing_mask = 1 - criterion_mask
         # Use Batch
         #if len(inputs.shape) != 3: # is 4 if you are using batch
@@ -296,18 +301,19 @@ def eval_epoch(model, dataloader, criterion, body_parts_class, dataset_name, epo
         # No use Batch
         #else:
 
-        src_mask = model.get_src_mask(mask, inputs.shape[0]).to(device)
-        prediction = model(inputs*no_missing_mask, sota*no_missing_mask, coder_mask=mask, decoder_mask=mask, src_mask=src_mask)
-        prediction = prediction * criterion_mask + inputs * no_missing_mask
+        src_mask = model.get_src_mask(mask[:,:-1], inputs[:-1,:,:].shape[0]).to(device)
+        prediction, encoder_loss, decoder_loss = model(inputs[:-1,:,:]*no_missing_mask, sota*no_missing_mask, coder_mask=1-mask[:,:-1], decoder_mask=mask[:,:-1], src_mask=src_mask) # TODO check no_missing_mask
+
+        #prediction = prediction * criterion_mask + inputs * no_missing_mask
         
         loss = criterion(prediction, sota)
         loss_collector_acum.append(loss.clone().detach().cpu().numpy())
         
         if epoch == 0:
-            baseline_loss = criterion(inputs, sota)
+            baseline_loss = criterion(inputs[1:,:,:], sota)
             loss_baseline_acum.append(baseline_loss.clone().detach().cpu().numpy())
 
-            cubic = cubic_interpolation(inputs, mask)
+            cubic = cubic_interpolation(inputs[1:,:,:], mask[:,1:])
             cubic_loss = criterion(cubic, sota)
             loss_cubic_acum.append(cubic_loss)
 
@@ -317,25 +323,17 @@ def eval_epoch(model, dataloader, criterion, body_parts_class, dataset_name, epo
         # Print in WandB
         if i == 1:
             # Use Batch
-            if len(inputs.shape) != 3:
-                batch_pos = 1
-                sent_validation_result(inputs[batch_pos], prediction[batch_pos], sota[batch_pos,:,:,:], connections, epoch)
+            # if len(inputs.shape) != 3:
+            #     batch_pos = 1
+            #     sent_validation_result(inputs[batch_pos] * no_missing_mask, prediction[batch_pos], sota[batch_pos,:,:,:], connections, epoch)
                 #sent_test_result(model, inputs[batch_pos], mask[batch_pos], device)
             # No use Batch
-            else:
-                sent_validation_result(inputs, prediction, sota, connections, epoch)
+            # else:
+
+            sent_validation_result(inputs[:-1,:,:], prediction, sota, connections, epoch)
                 #sent_test_result(model, inputs, mask, device)
-    
-    mean_loss = np.mean(loss_collector_acum, axis=0)
-    
-    if mean_loss < min_loss:
-        print(mean_loss, min_loss, opt_lr_cont)
-        opt_lr_cont = 0
-        min_loss = mean_loss
-        sent_histogram(loss_baseline_acum, loss_collector_acum, loss_cubic_acum, dataset_name, epoch)  
-    else:
-        opt_lr_cont = opt_lr_cont + 1
-    return mean_loss
+
+    return loss_collector_acum
 
 def train(args):
 
@@ -368,25 +366,46 @@ def train(args):
     wandb.watch(keysecom_model)
     criterion = MSELoss()#EuclideanLoss()#MSELoss()
     criterion_validation = EuclideanLoss()
-    #optimizer = Adam(keysecom_model.parameters(), lr=args.lr)
-    optimizer = RMSprop(keysecom_model.parameters(), lr=args.lr)
+    optimizer = Adam(keysecom_model.parameters(), lr=args.lr)
+    # optimizer = RMSprop(keysecom_model.parameters(), lr=args.lr)
     keysecom_model.train(True)
     keysecom_model.to(device)
 
+    best_model_state_dict = None
     epoch_start = 0
-    opt_lr_cont = 0
-    losses = []
+    #losses = []
+    patience_loss = 0
+    min_loss = float('inf')
+    
+    # learning rate scheduler | This function doesn't work for continue learning at certain point
+    initial_lr = args.lr
+    final_lr = args.lr/100
+    lr_values = np.linspace(initial_lr, final_lr, num=args.epochs)
+    #scheduler = LambdaLR(optimizer, lr_lambda=lr_lambda)
 
     # TRAINING AND EVALUATION
-
     for epoch in range(epoch_start, args.epochs):
-
-        optimizer = lr_lambda(epoch, args.lr, optimizer)
+        print(f'|=> Epoch: [{epoch}], Lr_rate: {optimizer.param_groups[0]["lr"]}')
+        '''
+        if patience_loss >= 10:
+            args.lr = args.lr/10
+            patience_loss = 0
+            
+            # Cargar el modelo con el menor loss hasta ese momento
+            if best_model_state_dict is not None:
+                keysecom_model.load_state_dict(best_model_state_dict)
+                optimizer = torch.optim.Adam(keysecom_model.parameters(), lr=args.lr)
+        '''
+        optimizer = lr_lambda(epoch, lr_values, optimizer)
         
-        print("epoch:",epoch)
-        train_loss = train_epoch(keysecom_model, train_loader, criterion, optimizer, device)
-        val_loss = eval_epoch(keysecom_model, val_loader, criterion_validation, body_parts_class,
-                              val_set.dataset_name, epoch, opt_lr_cont, device)
+        print("patinece:", patience_loss)
+
+        train_loss_acum = train_epoch(keysecom_model, train_loader, criterion, optimizer, device)
+        val_loss_acum = eval_epoch(keysecom_model, val_loader, criterion_validation, epoch, device)
+        
+        train_loss = np.mean(train_loss_acum)
+        val_loss = np.mean(val_loss_acum)
+        
         print("train loss:", train_loss)
         print("eval loss:", val_loss)
 
@@ -395,8 +414,20 @@ def train(args):
             'val_loss':val_loss,
             'epoch': epoch
         })
+        
+        
+        if val_loss < min_loss:
+            patience_loss = 0
+            min_loss = val_loss
+            sent_histogram(loss_baseline_acum, val_loss_acum, loss_cubic_acum, val_set.dataset_name, epoch)  
 
-        losses.append(train_loss.item())
+            #best_model_state_dict = keysecom_model.state_dict()
+        else:
+            patience_loss = patience_loss + 1
+            #keysecom_model.load_state_dict(best_model_state_dict)
+            #optimizer = torch.optim.Adam(keysecom_model.parameters(), lr=lr_values[epoch])
+        #scheduler.step()
+        # losses.append(train_loss.item())
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser("", parents=[parseMain.get_default_args()], add_help=False)
