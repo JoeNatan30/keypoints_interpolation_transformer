@@ -2,6 +2,7 @@
 import dataloader
 from torch.utils.data import DataLoader
 from torch.nn import MSELoss
+from euclidean_loss import EuclideanLoss
 import torch
 import numpy as np
 import pandas as pd
@@ -11,7 +12,7 @@ from utils import load_configuration
 
 
 np.random.seed(42)
-pd.np.random.seed(42)
+#pd.np.random.seed(42)
 torch.manual_seed(42)
 
 
@@ -28,11 +29,11 @@ def replace_frame_with_zeros(inputs, mask):
 
 def main():
     
-    to_process = "AEC" #AEC #PUCP_PSL_DGI305 #AUTSL
+    to_process = "AUTSL" #AEC #PUCP_PSL_DGI305 #AUTSL
     dataset_info = load_configuration("dataset_config")
 
     g = torch.Generator()
-    criterion = MSELoss()
+    criterion = EuclideanLoss() # EuclideanLoss # MSELoss
 
     val_set = dataloader.LSP_Dataset(f'data/validation--{to_process}.hdf5', have_aumentation=False, keypoints_model='mediapipe',is_random_missing=False)
 
@@ -46,7 +47,7 @@ def main():
         inputs = inputs.squeeze(0).float()
         sota = sota.squeeze(0).float()
 
-        loss = criterion(inputs, sota)
+        loss = criterion(inputs[1:,:,:], sota)
 
         #print("pred:",prediction[0])
         #print("sota:",sota[1:,:,:][0])
@@ -61,7 +62,7 @@ def main():
     plt.title('Histogram of loss - Cubic')
     plt.xlabel('Loss')
     plt.ylabel('Frequence')
-    plt.savefig(f'results/initial_loss_{to_process}.jpg')
+    plt.savefig(f'results/initial_loss_euclidean_{to_process}.jpg')
     plt.legend(['Datos'])
 
     

@@ -14,7 +14,7 @@ from euclidean_loss import EuclideanLoss
 
 
 np.random.seed(42)
-pd.np.random.seed(42)
+#pd.np.random.seed(42)
 torch.manual_seed(42)
 
 
@@ -60,7 +60,7 @@ def cubic_interpolation(data, mask):
 
 def main():
     
-    to_process = "AEC" #AEC #PUCP_PSL_DGI305 #AUTSL
+    to_process = "AUTSL" #AEC #PUCP_PSL_DGI305 #AUTSL
     dataset_info = load_configuration("dataset_config")
 
     g = torch.Generator()
@@ -85,11 +85,11 @@ def main():
         #    mask = mask.squeeze(0).float()
         #print(mask)
         #inputs = replace_frame_with_zeros(inputs, mask)
-        baseline_loss = criterion(inputs, sota)
+        baseline_loss = criterion(inputs[1:,:,:], sota)
         #print(mask)
         prediction = cubic_interpolation(inputs, mask)
 
-        loss = criterion(prediction, sota)
+        loss = criterion(prediction[1:,:,:], sota)
 
         #print("pred:",prediction[0])
         #print("sota:",sota[1:,:,:][0])
@@ -140,15 +140,26 @@ def main():
     plt.savefig(f'results/cubic_histogram_freq_{to_process}.jpg')
     #plt.legend(['Datos'])
     
-
-
     all_losses = [loss_baseline_acum, loss_collector_acum]
     medians = [np.median(loss) for loss in all_losses]
     labels = ['Baseline', 'Cubic I.'] 
 
     fig, ax = plt.subplots(figsize=(8, 6))
 
-    ax.violinplot(all_losses, showmedians=True)
+    # Crea los violines
+    violins = ax.violinplot(all_losses, showmedians=True)
+    colors = ['skyblue', 'orange']#'lightgreen']  # Cambia los colores según tus preferencias
+
+    for i, violin in enumerate(violins['bodies']):
+        violin.set_facecolor(colors[i])
+        violin.set_edgecolor('black')
+        violin.set_alpha(0.7)
+
+    # Agrega etiquetas a los violines
+    for i, label in enumerate(labels, start=1):
+        violins['bodies'][i - 1].set_label(label)
+
+    # Agrega puntos para representar las medianas
     ax.plot(np.arange(1, len(labels) + 1), medians, marker='o', linestyle='None', color='blue', label='median')
 
     ax.grid(axis='y', linestyle='--', alpha=0.7)
@@ -160,7 +171,7 @@ def main():
 
     # Agrega una leyenda para la línea de la mediana
     plt.legend()
-    
+
     plt.savefig(f"results/cubic_histogram_{to_process}.jpg")
     
     
