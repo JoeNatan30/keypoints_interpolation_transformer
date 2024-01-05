@@ -20,7 +20,7 @@ import cv2
 from utils import load_configuration
 
 np.random.seed(42)
-pd.np.random.seed(42)
+#pd.np.random.seed(42)
 torch.manual_seed(42)
 random.seed(42)
 
@@ -597,7 +597,8 @@ class LSP_Dataset(Dataset):
         self.data = video_dataset
         self.current_data_idx = 0
         
-        self.data_validation, self.validation_mask = self.create_validation_data(np.copy(video_dataset))
+        if not self.is_train:
+            self.data_validation, self.validation_mask = self.create_validation_data(video_dataset)
 
     
     def create_validation_data(self, data):
@@ -637,7 +638,6 @@ class LSP_Dataset(Dataset):
             mask = self.validation_mask[idx]
 
             depth_map_missing, mask = put_missing_frames(depth_map.clone().detach(), self.is_random_missing, self.dataset_name)
-            #depth_map_missing, mask = delete_last_sequence(depth_map_missing, mask)
             depth_map_missing, mask = add_sos(depth_map_missing, mask)
 
             self.current_data_idx = (self.current_data_idx + 1) % len(self.data)

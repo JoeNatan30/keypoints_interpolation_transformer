@@ -109,33 +109,35 @@ def calculate_intermediate_loss(outputs, target):
 
 
 class KeypointCompleter(nn.Module):
-    def __init__(self, input_size, hidden_dim, num_layers):
+    def __init__(self, input_size, hidden_dim, num_layers, num_heads):
         super(KeypointCompleter, self).__init__()
 
         # EMBEDDING
         self.embedding = nn.Linear(input_size, hidden_dim)
-
+        
         # POSITION ENCODING
         self.positional_encoder = PositionalEncoding(
                                     dim_model=hidden_dim,
-                                    dropout_p=0.1, 
+                                    dropout_p=0.0, 
                                     max_len=512)
 
+        self.norm1 = nn.LayerNorm(hidden_dim)
 
-        #self.row_embed = nn.Parameter(torch.rand(50, hidden_dim))
-
-        #self.pos = nn.Parameter(torch.cat([self.row_embed[0].unsqueeze(0).repeat(1, 1, 1)], dim=-1).flatten(0, 1).unsqueeze(0))
         # TRANSFORMER
         self.transformer = nn.Transformer(
                                     d_model=hidden_dim, 
-                                    nhead=8, 
+                                    nhead=num_heads,
+                                    activation="gelu",
+                                    dropout=0.0, 
                                     num_encoder_layers=num_layers, 
                                     num_decoder_layers=num_layers)
+        
+        self.norm2 = nn.LayerNorm(hidden_dim)
         
         # FINAL LAYER (LINEAR)
         self.fc = nn.Linear(hidden_dim, input_size)
 
-    def forward(self, inputs, trueInput=None, coder_mask=None, decoder_mask=None, src_mask=None):
+    def forward(self, inputs, trueInput=None, src_pad_mask=None, tgt_pad_mask=None, src_mask=None, tgt_mask=None):
 
         # Use Batch
         if len(inputs.shape) != 3:
@@ -160,6 +162,8 @@ class KeypointCompleter(nn.Module):
         o = self.embedding(o)
         o = self.positional_encoder(o)
         
+        h = self.norm1(h)
+        o = self.norm1(o)
         '''
         encoder_outputs = []
         for layer in self.transformer.encoder.layers:
@@ -180,7 +184,7 @@ class KeypointCompleter(nn.Module):
         intermediate_loss_encoder = calculate_intermediate_loss(encoder_outputs, trueInput)
         intermediate_loss_decoder = calculate_intermediate_loss(decoder_outputs, trueInput)
         '''
-        intermediate_loss_encoder, intermediate_loss_decoder = torch.tensor(0.0), torch.tensor(0.0)
+        #intermediate_loss_encoder, intermediate_loss_decoder = torch.tensor(0.0), torch.tensor(0.0)
         #if coder_mask==None:
         #    if decoder_mask==None:
         #        h = self.transformer(h, o, src_mask=src_mask).transpose(0, 1)
@@ -190,8 +194,14 @@ class KeypointCompleter(nn.Module):
         # the reason of use of src_key_padding_mask is here: https://discuss.pytorch.org/t/transformer-difference-between-src-mask-and-src-key-padding-mask/84024
         # key_padding_mask is used to ignore certain position in the timestep to avoid the model cheating
         # in this case, in the "src" is used to "cheat" because this work is interpolation and not prediction 
-        
-        h = self.transformer(h, o, src_key_padding_mask=coder_mask, tgt_key_padding_mask=decoder_mask, src_mask=src_mask).transpose(0, 1)
+
+        h = self.transformer(h, o, 
+                             src_key_padding_mask=src_pad_mask, 
+                             tgt_key_padding_mask=tgt_pad_mask, 
+                             src_mask=src_mask,
+                             tgt_mask=tgt_mask).transpose(0, 1)
+
+        h = self.norm2(h)
 
         decoded = self.fc(h)
     
@@ -209,14 +219,13 @@ class KeypointCompleter(nn.Module):
 
         #decoded = self.fc(h)
     
-        return decoded, intermediate_loss_encoder, intermediate_loss_decoder
+        return decoded
 
-
-    def get_src_mask(self, mask, size) -> torch.tensor:
+    def get_mask(self, mask, size) -> torch.tensor:
 
         matrix_mask = mask.clone().repeat(1, size, 1)
         matrix_mask = matrix_mask.squeeze()
-        
+
         matrix_mask = torch.where(matrix_mask == 1, torch.tensor(float('-inf')), matrix_mask)
         #matrix_mask = torch.where(matrix_mask == 1, torch.tensor(0.0), matrix_mask)
         # To generate the triangle of 0.0

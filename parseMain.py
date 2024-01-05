@@ -5,11 +5,14 @@ def get_default_args():
 
     parser.add_argument("--experiment_name", type=str, default="lsa_64_spoter",
                         help="Name of the experiment after which the logs and plots will be named")
-    parser.add_argument("--num_classes", type=int, default=50, help="Number of classes to be recognized by the model")
-    parser.add_argument("--hidden_dim", type=int, default=108,
-                        help="Hidden dimension of the underlying Transformer model")
     parser.add_argument("--seed", type=int, default=42,
                         help="Seed with which to initialize all the random components of the training")
+    parser.add_argument("--hidden_dim", type=int, default=128,
+                        help="Hidden dimension of the underlying Transformer model")
+    parser.add_argument("--num_heads", type=int, default=8)
+    parser.add_argument("--num_layers", type=int, default=6)
+    parser.add_argument("--weight_decay", type=int, default=0.0)
+    
 
     # Data
     parser.add_argument("--training_set_path", type=str, default="", help="Path to the training dataset CSV file")

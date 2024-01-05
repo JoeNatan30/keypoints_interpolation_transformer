@@ -26,7 +26,7 @@ from utils import prepare_keypoints_image, get_edges_index
 
 
 np.random.seed(42)
-pd.np.random.seed(42)
+#pd.np.random.seed(42)
 torch.manual_seed(42)
 
 
@@ -58,11 +58,10 @@ def lr_lambda(current_step, lr, optim):
     return optim
 
 def cubic_interpolation(data, mask):
-    data_copy = data.clone().detach().permute(1, 2, 0)
+    data_copy = data.clone().detach().permute(1, 2, 0).cpu()
     interpolated_data = torch.empty_like(data_copy)
-    #print(data_copy.shape, mask.shape)
-
-    for _pos, _val in enumerate(mask[0]):
+    
+    for _pos, _val in enumerate(mask):
  
         if _val == 1:
             #print(data_copy.shape, _pos)
@@ -96,6 +95,8 @@ def sent_histogram(loss_baseline_acum, loss_collector_acum, loss_cubic_acum, to_
     :param bins: Número de bins para el histograma.
     :param figsize: Tamaño de la figura.
     """
+    
+    '''
     # Definir paleta de colores y estilos de línea
     colors = ['skyblue', 'orange', 'brown']
     line_styles = ['dashed', 'dashed', 'dashed']
@@ -130,11 +131,43 @@ def sent_histogram(loss_baseline_acum, loss_collector_acum, loss_cubic_acum, to_
     plt.ylabel('Frequency', fontsize=14)
 
     plt.tight_layout()  # Ajustar el diseño automáticamente para evitar superposiciones
+    '''
+    all_losses = [loss_baseline_acum, loss_collector_acum, loss_cubic_acum]
+    medians = [np.median(loss) for loss in all_losses]
+    labels = ['Baseline', 'AI', "Cubicspline"] 
 
+    fig, ax = plt.subplots(figsize=(8, 6))
+
+    # Crea los violines
+    violins = ax.violinplot(all_losses, showmedians=True)
+    colors = ['steelblue', 'brown', 'orange']  # Cambia los colores según tus preferencias
+
+    for i, violin in enumerate(violins['bodies']):
+        violin.set_facecolor(colors[i])
+        violin.set_edgecolor('black')
+        violin.set_alpha(0.7)
+
+    # Agrega etiquetas a los violines
+    for i, label in enumerate(labels, start=1):
+        violins['bodies'][i - 1].set_label(label)
+
+    # Agrega puntos para representar las medianas
+    #ax.plot(np.arange(1, len(labels) + 1), medians, marker='o', linestyle='None', color='blue', label='median')
+
+    ax.grid(axis='y', linestyle='--', alpha=0.7)
+
+    # Personaliza el título y las etiquetas de los ejes
+    plt.title('Loss Comparison: Cubic Interpolation vs. Baseline', fontsize=16)
+    plt.xlabel('Algorithm', fontsize=14)
+    plt.ylabel('Loss', fontsize=14)
+
+    # Agrega una leyenda para la línea de la mediana
+    plt.legend()
+    
     plt.savefig(f'results/IA_histogram_{to_process}.jpg')
     wandb.log({"IA_histogram": [wandb.Image(f"results/IA_histogram_{to_process}.jpg", caption="histogram - Interpolation IA")]}, step=epoch)
 
-    all_losses = [loss_baseline_acum, loss_collector_acum, loss_cubic_acum]
+    # ### ### ### ### ###
 
     # Realiza el análisis de varianza (ANOVA)
     f_stat, p_value = f_oneway(*all_losses)
@@ -243,30 +276,41 @@ def train_epoch(model, dataloader, criterion, optimizer, device):
 
         inputs, sota, mask = data
 
-        inputs = inputs.squeeze(0).to(device).float()
-        sota = sota.squeeze(0).to(device).float()
-
+        x = inputs.squeeze(0).to(device).float()[:-1,:,:]
+        
+        y = sota.squeeze(0).to(device).float()
+        
+        mask = mask.squeeze(0).to(device).float()
+        x_mask = mask[:-1].clone().detach()
+        y_mask = mask[1:].clone().detach()
+        
+        x_no_missing_mask = 1 - x_mask
+        y_no_missing_mask = 1 - y_mask
         #if mask!=None:
         #    mask = mask.squeeze(0).to(device).float()
-        
-        criterion_mask = mask[:,1:].clone().detach().permute(1, 0).unsqueeze(-1)
-        no_missing_mask = 1 - criterion_mask
 
         # Use Batch
         #if len(inputs.shape) != 3: # is 4 if you are using batch
             # src_mask = model.get_src_mask(mask[:,:-1], inputs[:-1,:,:].shape[1]).to(device)
-            # prediction = model(inputs[:-1,:,:], sota, coder_mask=mask, src_mask=src_mask) 
-            # loss = criterion(prediction, sota)
+            # pred = model(inputs[:-1,:,:], sota, coder_mask=mask, src_mask=src_mask) 
+            # loss = criterion(pred, sota)
         # No use Batch
 
         # else:
-        src_mask = model.get_src_mask(mask[:,:-1], inputs[:-1,:,:].shape[0]).to(device)
-        prediction, endocer_loss, decoder_loss = model(inputs[:-1,:,:], sota, coder_mask=1-mask[:,:-1], src_mask=src_mask) #TODO check coder_mask array values
 
-        prediction = prediction * criterion_mask + inputs[1:,:,:] * no_missing_mask
-        loss = criterion(prediction, sota)
+        src_mask = model.get_mask(x_mask, x.shape[0]).to(device)
+        tgt_mask = model.get_mask(y_mask, y.shape[0]).to(device)
 
-        loss = loss.float() + endocer_loss.float() * 0.5# + decoder_loss.float() * 0.5
+        pred = model(x, y,
+                     src_pad_mask=x_mask.unsqueeze(0), 
+                     tgt_pad_mask=y_mask.unsqueeze(0), 
+                     src_mask=src_mask, 
+                     tgt_mask=tgt_mask)
+        #print(pred.shape, y_mask.unsqueeze(1).unsqueeze(2).shape, y.shape, y_no_missing_mask.unsqueeze(1).unsqueeze(2).shape, "<--")
+        #pred = pred * y_mask.unsqueeze(1).unsqueeze(2) + y * y_no_missing_mask.unsqueeze(1).unsqueeze(2)
+        loss = criterion(pred, y)
+
+        loss = loss.float() # + endocer_loss.float() * 0.5# + decoder_loss.float() * 0.5
         loss_collector_acum.append(loss.clone().detach().cpu().numpy())
         
         optimizer.zero_grad()
@@ -286,35 +330,51 @@ def eval_epoch(model, dataloader, criterion, epoch, device):
     for i, data in enumerate(dataloader):
 
         inputs, sota, mask = data
-        inputs = inputs.squeeze(0).to(device).float()
-        sota = sota.squeeze(0).to(device).float()
+        
+        x = inputs.squeeze(0).to(device).float()[:-1,:,:]
+        x_no_sota = inputs.squeeze(0).to(device).float()[1:,:,:]
+        
+        y = sota.squeeze(0).to(device).float()
+
+        mask = mask.squeeze(0).to(device).float()
+        x_mask = mask[:-1].clone().detach()
+        y_mask = mask[1:].clone().detach()
+        
+        x_no_missing_mask = 1 - x_mask
+        y_no_missing_mask = 1 - y_mask
+        
         #print("mask:",mask.shape)
         #if mask!=None:
         #    mask = mask.squeeze(0).to(device).float()
-        criterion_mask = mask[:,1:].clone().detach().permute(1, 0).unsqueeze(-1)
-        no_missing_mask = 1 - criterion_mask
+        
         # Use Batch
         #if len(inputs.shape) != 3: # is 4 if you are using batch
         #    src_mask = model.get_src_mask(inputs.shape[1]).to(device)
-        #    prediction = model(inputs, sota[:,:-1,:,:], coder_mask=mask, src_mask=src_mask)
-        #    loss = criterion(prediction, sota[:,1:,:,:])
+        #    pred = model(inputs, sota[:,:-1,:,:], coder_mask=mask, src_mask=src_mask)
+        #    loss = criterion(pred, sota[:,1:,:,:])
         # No use Batch
         #else:
 
-        src_mask = model.get_src_mask(mask[:,:-1], inputs[:-1,:,:].shape[0]).to(device)
-        prediction, encoder_loss, decoder_loss = model(inputs[:-1,:,:]*no_missing_mask, sota*no_missing_mask, coder_mask=1-mask[:,:-1], decoder_mask=mask[:,:-1], src_mask=src_mask) # TODO check no_missing_mask
+        src_mask = model.get_mask(x_mask, x.shape[0]).to(device)
+        tgt_mask = model.get_mask(y_mask, y.shape[0]).to(device)
 
-        #prediction = prediction * criterion_mask + inputs * no_missing_mask
+        pred = model(x, x_no_sota,
+                     src_pad_mask=x_mask.unsqueeze(0), 
+                     tgt_pad_mask=y_mask.unsqueeze(0), 
+                     src_mask=src_mask, 
+                     tgt_mask=tgt_mask)
+                        
+        pred = pred * y_mask.unsqueeze(1).unsqueeze(2) + y * y_no_missing_mask.unsqueeze(1).unsqueeze(2)
         
-        loss = criterion(prediction, sota)
+        loss = criterion(pred, y)
         loss_collector_acum.append(loss.clone().detach().cpu().numpy())
         
         if epoch == 0:
-            baseline_loss = criterion(inputs[1:,:,:], sota)
+            baseline_loss = criterion(x_no_sota, y)
             loss_baseline_acum.append(baseline_loss.clone().detach().cpu().numpy())
 
-            cubic = cubic_interpolation(inputs[1:,:,:], mask[:,1:])
-            cubic_loss = criterion(cubic, sota)
+            cubic = cubic_interpolation(x_no_sota, y_mask)
+            cubic_loss = criterion(cubic, y.clone().detach().cpu())
             loss_cubic_acum.append(cubic_loss)
 
         #loss = loss.float()    
@@ -325,12 +385,11 @@ def eval_epoch(model, dataloader, criterion, epoch, device):
             # Use Batch
             # if len(inputs.shape) != 3:
             #     batch_pos = 1
-            #     sent_validation_result(inputs[batch_pos] * no_missing_mask, prediction[batch_pos], sota[batch_pos,:,:,:], connections, epoch)
+            #     sent_validation_result(inputs[batch_pos] * no_missing_mask, pred[batch_pos], sota[batch_pos,:,:,:], connections, epoch)
                 #sent_test_result(model, inputs[batch_pos], mask[batch_pos], device)
             # No use Batch
             # else:
-
-            sent_validation_result(inputs[:-1,:,:], prediction, sota, connections, epoch)
+            sent_validation_result(x * x_no_missing_mask.unsqueeze(1).unsqueeze(2), pred, y, connections, epoch)
                 #sent_test_result(model, inputs, mask, device)
 
     return loss_collector_acum
@@ -362,7 +421,10 @@ def train(args):
     train_loader = DataLoader(train_set, shuffle=True, batch_size=1,  generator=g)
     val_loader = DataLoader(val_set, shuffle=False, batch_size=1,  generator=g)
     
-    keysecom_model = model.KeypointCompleter(input_size=54*2, hidden_dim=128, num_layers=6)
+    keysecom_model = model.KeypointCompleter(input_size=54*2, 
+                                             hidden_dim=args.hidden_dim, 
+                                             num_layers=args.num_layers,
+                                             num_heads=args.num_heads)
     wandb.watch(keysecom_model)
     criterion = MSELoss()#EuclideanLoss()#MSELoss()
     criterion_validation = EuclideanLoss()
@@ -379,7 +441,7 @@ def train(args):
     
     # learning rate scheduler | This function doesn't work for continue learning at certain point
     initial_lr = args.lr
-    final_lr = args.lr/100
+    final_lr = args.lr/5
     lr_values = np.linspace(initial_lr, final_lr, num=args.epochs)
     #scheduler = LambdaLR(optimizer, lr_lambda=lr_lambda)
 
@@ -409,23 +471,23 @@ def train(args):
         print("train loss:", train_loss)
         print("eval loss:", val_loss)
 
-        wandb.log({
-            'train_loss': train_loss,
-            'val_loss':val_loss,
-            'epoch': epoch
-        })
+        
         
         
         if val_loss < min_loss:
-            patience_loss = 0
             min_loss = val_loss
             sent_histogram(loss_baseline_acum, val_loss_acum, loss_cubic_acum, val_set.dataset_name, epoch)  
 
             #best_model_state_dict = keysecom_model.state_dict()
-        else:
-            patience_loss = patience_loss + 1
-            #keysecom_model.load_state_dict(best_model_state_dict)
-            #optimizer = torch.optim.Adam(keysecom_model.parameters(), lr=lr_values[epoch])
+        
+        wandb.log({
+            'train_loss': train_loss,
+            'val_loss':val_loss,
+            'epoch': epoch,
+            'minimun_loss': min_loss,
+        })
+        #keysecom_model.load_state_dict(best_model_state_dict)
+        #optimizer = torch.optim.Adam(keysecom_model.parameters(), lr=lr_values[epoch])
         #scheduler.step()
         # losses.append(train_loss.item())
 
@@ -437,7 +499,7 @@ if __name__ == '__main__':
                      entity=ENTITY,
                      config=args,
                      name=args.experiment_name,
-                     mode="offline",
+                     #mode="offline",
                      job_type="model-training",
                      tags=TAG)
 
