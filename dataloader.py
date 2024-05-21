@@ -609,10 +609,11 @@ class LSP_Dataset(Dataset):
             
             depth_map = torch.from_numpy(data[i])
             
-            if self.transform:
-                depth_map = self.transform(depth_map)
+            #if self.transform:
+            #    depth_map = self.transform(depth_map)
             
             depth_map_missing, mask = put_missing_frames(depth_map.clone().detach(), self.is_random_missing, self.dataset_name)
+            depth_map_missing, mask = add_sos(depth_map_missing, mask)
             
             depth_acum.append(depth_map_missing)
             mask_acum.append(mask)
@@ -637,8 +638,8 @@ class LSP_Dataset(Dataset):
             depth_map_missing = self.data_validation[idx]
             mask = self.validation_mask[idx]
 
-            depth_map_missing, mask = put_missing_frames(depth_map.clone().detach(), self.is_random_missing, self.dataset_name)
-            depth_map_missing, mask = add_sos(depth_map_missing, mask)
+            #depth_map_missing, mask = put_missing_frames(depth_map.clone().detach(), self.is_random_missing, self.dataset_name)
+            #depth_map_missing, mask = add_sos(depth_map_missing, mask)
 
             self.current_data_idx = (self.current_data_idx + 1) % len(self.data)
             
@@ -671,7 +672,6 @@ class LSP_Dataset(Dataset):
         # Missing frames
         
         depth_map_missing, mask = put_missing_frames(depth_map.clone().detach(), self.is_random_missing, self.dataset_name)
-  
         depth_map_missing, mask = add_sos(depth_map_missing, mask)
         #depth_map_missing, mask = delete_last_sequence(depth_map_missing, mask)
 

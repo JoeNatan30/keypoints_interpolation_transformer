@@ -113,138 +113,135 @@ class KeypointCompleter(nn.Module):
         super(KeypointCompleter, self).__init__()
 
         # EMBEDDING
-        self.embedding = nn.Linear(input_size, hidden_dim)
+        self.input_embedding = nn.Linear(108, hidden_dim)
+        self.filled_embedding = nn.Linear(108, hidden_dim)
+        
+        # NORM 1
+        self.input_norm1 = nn.InstanceNorm1d(hidden_dim)
+        self.filled_norm1 = nn.InstanceNorm1d(hidden_dim)
         
         # POSITION ENCODING
-        self.positional_encoder = PositionalEncoding(
-                                    dim_model=hidden_dim,
-                                    dropout_p=0.0, 
-                                    max_len=512)
-
-        self.norm1 = nn.LayerNorm(hidden_dim)
+        
+        self.trig_input_positional_encoder = PositionalEncoding(dim_model=hidden_dim, dropout_p=0.0, max_len=512)
+        self.trig_filled_positional_encoder = PositionalEncoding(dim_model=hidden_dim, dropout_p=0.0, max_len=512)
+        
+        self.learned_input_positional_encoder = nn.Parameter(torch.rand(1, 1, hidden_dim))
+        self.learned_filled_positional_encoder = nn.Parameter(torch.rand(1, 1, hidden_dim))
 
         # TRANSFORMER
         self.transformer = nn.Transformer(
-                                    d_model=hidden_dim, 
-                                    nhead=num_heads,
-                                    activation="gelu",
-                                    dropout=0.0, 
-                                    num_encoder_layers=num_layers, 
-                                    num_decoder_layers=num_layers)
+                            d_model=hidden_dim, 
+                            nhead=num_heads,
+                            activation="gelu",
+                            dropout=0.0,
+                            num_encoder_layers=num_layers, 
+                            num_decoder_layers=num_layers)
         
-        self.norm2 = nn.LayerNorm(hidden_dim)
+        # NORM 2
+        self.norm2 = nn.InstanceNorm1d(hidden_dim)
         
         # FINAL LAYER (LINEAR)
-        self.fc = nn.Linear(hidden_dim, input_size)
+        self.fc_final = nn.Linear(hidden_dim, input_size)
 
-    def forward(self, inputs, trueInput=None, src_pad_mask=None, tgt_pad_mask=None, src_mask=None, tgt_mask=None):
+    def forward(self, inputs, filled=None, src_pad_mask=None, tgt_pad_mask=None, src_mask=None, tgt_mask=None):
 
         # Use Batch
         if len(inputs.shape) != 3:
-            h = inputs.flatten(start_dim=2).float()
-            h = torch.permute(h, (1, 0, 2))
-            o = trueInput.flatten(start_dim=2).float()
-            o = torch.permute(o, (1, 0, 2))
-            if coder_mask != None:
-                coder_mask = torch.permute(coder_mask, (1, 0, 2))
-                coder_mask = coder_mask.squeeze(0)
-            if decoder_mask != None:
-                decoder_mask = torch.permute(decoder_mask, (1, 0, 2))
-                decoder_mask = decoder_mask.squeeze(0)
+            input_seq = inputs.flatten(start_dim=2).float()
+            input_seq = torch.permute(input_seq, (1, 0, 2))
+            filled_seq = filled.flatten(start_dim=2).float()
+            filled_seq = torch.permute(filled_seq, (1, 0, 2))
+            if src_mask != None:
+                src_mask = torch.permute(src_mask, (1, 0, 2))
+                src_mask = src_mask.squeeze(0)
+            if tgt_mask != None:
+                tgt_mask = torch.permute(tgt_mask, (1, 0, 2))
+                tgt_mask = tgt_mask.squeeze(0)
         # Not use batch
         else:
-            h = torch.unsqueeze(inputs.flatten(start_dim=1), 1).float()
-            o = torch.unsqueeze(trueInput.flatten(start_dim=1), 1).float()
+            input_seq = torch.unsqueeze(inputs.flatten(start_dim=1), 1).float()
+            filled_seq = torch.unsqueeze(filled.flatten(start_dim=1), 1).float()
 
-        h = self.embedding(h)
-        h = self.positional_encoder(h)
-
-        o = self.embedding(o)
-        o = self.positional_encoder(o)
+        # EMBEDDING
+        input_emb = self.input_embedding(input_seq)
+        filled_emb = self.filled_embedding(filled_seq)
         
-        h = self.norm1(h)
-        o = self.norm1(o)
-        '''
-        encoder_outputs = []
-        for layer in self.transformer.encoder.layers:
-            h_intermediate = layer.self_attn(h, h, h, attn_mask=src_mask, key_padding_mask=coder_mask)[0]
-            h_intermediate = self.fc(h_intermediate)
-            h_intermediate = h_intermediate.permute(0, 2, 1)
-            h_intermediate = h_intermediate.view(-1, 54, 2)
-            encoder_outputs.append(h_intermediate)
+        # NORM 1
+        input_norm = self.input_norm1(input_emb)
+        filled_norm = self.filled_norm1(filled_emb)
+        
+        # POSITION ENCODING
+        input_pos_trig = self.trig_input_positional_encoder(input_norm)
+        filled_pos_trig = self.trig_filled_positional_encoder(filled_norm)
+        
+        input_pos = input_norm + input_pos_trig + self.learned_input_positional_encoder
+        filled_pos = filled_norm + filled_pos_trig + self.learned_filled_positional_encoder
+        #input_pos = input_pos_trig + self.learned_input_positional_encoder
+        #filled_pos = filled_pos_trig + self.learned_filled_positional_encoder
 
-        decoder_outputs = []
-        for layer in self.transformer.decoder.layers:
-            o_intermediate = layer.self_attn(o, o, o, attn_mask=src_mask, key_padding_mask=coder_mask)[0]
-            o_intermediate = self.fc(o_intermediate)
-            o_intermediate = o_intermediate.permute(0, 2, 1)
-            o_intermediate = o_intermediate.view(-1, 54, 2)
-            decoder_outputs.append(o_intermediate)
-
-        intermediate_loss_encoder = calculate_intermediate_loss(encoder_outputs, trueInput)
-        intermediate_loss_decoder = calculate_intermediate_loss(decoder_outputs, trueInput)
-        '''
-        #intermediate_loss_encoder, intermediate_loss_decoder = torch.tensor(0.0), torch.tensor(0.0)
-        #if coder_mask==None:
-        #    if decoder_mask==None:
-        #        h = self.transformer(h, o, src_mask=src_mask).transpose(0, 1)
-        #    else:
-        #        h = self.transformer(h, o, tgt_key_padding_mask=decoder_mask, src_mask=src_mask).transpose(0, 1)
-        #else:
-        # the reason of use of src_key_padding_mask is here: https://discuss.pytorch.org/t/transformer-difference-between-src-mask-and-src-key-padding-mask/84024
-        # key_padding_mask is used to ignore certain position in the timestep to avoid the model cheating
-        # in this case, in the "src" is used to "cheat" because this work is interpolation and not prediction 
-
-        h = self.transformer(h, o, 
+        # TRANSFORMER
+        decoded = self.transformer(input_pos, filled_pos, 
                              src_key_padding_mask=src_pad_mask, 
-                             tgt_key_padding_mask=tgt_pad_mask, 
+                             tgt_key_padding_mask=None, 
                              src_mask=src_mask,
-                             tgt_mask=tgt_mask).transpose(0, 1)
-
-        h = self.norm2(h)
-
-        decoded = self.fc(h)
-    
+                             tgt_mask=tgt_mask)
+        
+        # CONCATENATE input_emb and filled_emb
+        #decoded = self.norm2(decoded + filled_seq.transpose(0, 1))
+        decoded = self.norm2(decoded + filled_emb)
+        
+        # FINAL LAYER (LINEAR)
+        decoded = self.fc_final(decoded.transpose(0, 1))
+        
+        #decoded = decoded + filled_seq.transpose(0, 1)
+        
         # Use Batch
         if len(inputs.shape) != 3:
-
             decoded = decoded.unsqueeze(2) # torch.Size([N, S, E]) ->  torch.Size([N, S, 1, E])
             decoded = decoded.permute(0, 1, 3, 2) # | ->  torch.Size([N, S, E, 1])
             decoded = decoded.view(decoded.shape[0],-1, 54, 2) # | ->  torch.Size([N, S, E/D, D])
-
         else:
             decoded = decoded.squeeze(0).unsqueeze(1) # torch.Size([1, S, E]) -> torch.Size([S, 1, E])
             decoded = decoded.permute(0, 2, 1) # | -> torch.Size([S, E, 1])
             decoded = decoded.view(-1, 54, 2) # | -> torch.Size([S, E/D, D])
-
         #decoded = self.fc(h)
-    
+
         return decoded
 
-    def get_mask(self, mask, size) -> torch.tensor:
+    def get_mask(self, mask, size, matrixType = "triangle") -> torch.tensor:
 
-        matrix_mask = mask.clone().repeat(1, size, 1)
-        matrix_mask = matrix_mask.squeeze()
-
-        matrix_mask = torch.where(matrix_mask == 1, torch.tensor(float('-inf')), matrix_mask)
-        #matrix_mask = torch.where(matrix_mask == 1, torch.tensor(0.0), matrix_mask)
-        # To generate the triangle of 0.0
- 
-        for i in range(size):
-            for j in range(i + 1):
-                matrix_mask[i, j] = 0.0
-
-        # Generates a squeare matrix where the each row allows one word more to be seen
-        #mask = torch.tril(torch.ones(size, size) == 1) # Lower triangular matrix
-        #mask = mask.float()
-        #mask = mask.masked_fill(mask == 0, float('-inf')) # Convert zeros to -inf
-        #mask = mask.masked_fill(mask == 1, float(0.0)) # Convert ones to 0
+        if matrixType == "triangle":
+            ########################
+            # Generates a squeare matrix where the each row allows one word more to be seen
+            mask = torch.tril(torch.ones(size, size) == 1) # Lower triangular matrix
+            mask = mask.float()
+            mask = mask.masked_fill(mask == 0, float('-inf')) # Convert zeros to -inf
+            matrix_mask = mask.masked_fill(mask == 1, float(0.0)) # Convert ones to 0
+            
+            # EX for size=5:
+            # [[0., -inf, -inf, -inf, -inf],
+            #  [0.,   0., -inf, -inf, -inf],
+            #  [0.,   0.,   0., -inf, -inf],
+            #  [0.,   0.,   0.,   0., -inf],
+            #  [0.,   0.,   0.,   0.,   0.]]
+        elif matrixType == "repeat":
+            matrix_mask = mask.clone().repeat(1, size, 1)
+            matrix_mask = matrix_mask.squeeze()
         
-        # EX for size=5:
-        # [[0., -inf, -inf, -inf, -inf],
-        #  [0.,   0., -inf, -inf, -inf],
-        #  [0.,   0.,   0., -inf, -inf],
-        #  [0.,   0.,   0.,   0., -inf],
-        #  [0.,   0.,   0.,   0.,   0.]]
+        elif matrixType == "repeat-inc":
+            matrix_mask = mask.clone().repeat(1, size, 1)
+            matrix_mask = matrix_mask.squeeze()
+            matrix_mask = torch.where(matrix_mask == 1, torch.tensor(float('-inf')), matrix_mask)
+            
+            # To generate the triangle of 0.0 in the inferior part
+            
+            for i in range(size):
+                for j in range(i + 1):
+                    matrix_mask[i, j] = 0.0
+                    
+        elif matrixType == "all":
+            matrix_mask = torch.zeros(size, size)
+        else:
+            assert "Choose a correct matrixType - model.py"
         
         return matrix_mask

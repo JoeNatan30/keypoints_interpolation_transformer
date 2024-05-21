@@ -3,16 +3,17 @@ import argparse
 def get_default_args():
     parser = argparse.ArgumentParser(add_help=False)
 
-    parser.add_argument("--experiment_name", type=str, default="lsa_64_spoter",
+    parser.add_argument("--experiment_name", type=str, default=None,
                         help="Name of the experiment after which the logs and plots will be named")
     parser.add_argument("--seed", type=int, default=42,
                         help="Seed with which to initialize all the random components of the training")
-    parser.add_argument("--hidden_dim", type=int, default=128,
+    parser.add_argument("--hidden_dim", type=int, default=256,
                         help="Hidden dimension of the underlying Transformer model")
-    parser.add_argument("--num_heads", type=int, default=8)
+    parser.add_argument("--num_heads", type=int, default=16)
     parser.add_argument("--num_layers", type=int, default=6)
     parser.add_argument("--weight_decay", type=int, default=0.0)
-    
+    parser.add_argument("--notes", type=str, default="")
+    parser.add_argument("--patience", type=int, default=50)
 
     # Data
     parser.add_argument("--training_set_path", type=str, default="", help="Path to the training dataset CSV file")

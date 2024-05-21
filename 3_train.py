@@ -275,8 +275,9 @@ def train_epoch(model, dataloader, criterion, optimizer, device):
     for i, data in enumerate(dataloader):
 
         inputs, sota, mask = data
-
+        
         x = inputs.squeeze(0).to(device).float()[:-1,:,:]
+        x_no_sota = inputs.squeeze(0).to(device).float()[1:,:,:]
         
         y = sota.squeeze(0).to(device).float()
         
@@ -286,6 +287,7 @@ def train_epoch(model, dataloader, criterion, optimizer, device):
         
         x_no_missing_mask = 1 - x_mask
         y_no_missing_mask = 1 - y_mask
+        
         #if mask!=None:
         #    mask = mask.squeeze(0).to(device).float()
 
@@ -298,21 +300,22 @@ def train_epoch(model, dataloader, criterion, optimizer, device):
 
         # else:
 
-        src_mask = model.get_mask(x_mask, x.shape[0]).to(device)
-        tgt_mask = model.get_mask(y_mask, y.shape[0]).to(device)
+        src_mask = model.get_mask(x_mask, x.shape[0], "repeat-inc").to(device)
+        tgt_mask = model.get_mask(y_mask, y.shape[0], "repeat-inc").to(device)
 
-        pred = model(x, y,
-                     src_pad_mask=x_mask.unsqueeze(0), 
-                     tgt_pad_mask=y_mask.unsqueeze(0), 
-                     src_mask=src_mask, 
+        pred = model(x, x_no_sota,
+                     src_pad_mask=x_mask.unsqueeze(0),
+                     tgt_pad_mask=y_mask.unsqueeze(0),
+                     src_mask=src_mask,
                      tgt_mask=tgt_mask)
+
         #print(pred.shape, y_mask.unsqueeze(1).unsqueeze(2).shape, y.shape, y_no_missing_mask.unsqueeze(1).unsqueeze(2).shape, "<--")
         #pred = pred * y_mask.unsqueeze(1).unsqueeze(2) + y * y_no_missing_mask.unsqueeze(1).unsqueeze(2)
         loss = criterion(pred, y)
 
         loss = loss.float() # + endocer_loss.float() * 0.5# + decoder_loss.float() * 0.5
         loss_collector_acum.append(loss.clone().detach().cpu().numpy())
-        
+
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
@@ -355,12 +358,12 @@ def eval_epoch(model, dataloader, criterion, epoch, device):
         # No use Batch
         #else:
 
-        src_mask = model.get_mask(x_mask, x.shape[0]).to(device)
-        tgt_mask = model.get_mask(y_mask, y.shape[0]).to(device)
+        src_mask = model.get_mask(x_mask, x.shape[0], "repeat-inc").to(device)
+        tgt_mask = model.get_mask(y_mask, y.shape[0], "repeat-inc").to(device)
 
         pred = model(x, x_no_sota,
-                     src_pad_mask=x_mask.unsqueeze(0), 
-                     tgt_pad_mask=y_mask.unsqueeze(0), 
+                     src_pad_mask=x_mask.unsqueeze(0),
+                     tgt_pad_mask=y_mask.unsqueeze(0),
                      src_mask=src_mask, 
                      tgt_mask=tgt_mask)
                         
@@ -389,10 +392,16 @@ def eval_epoch(model, dataloader, criterion, epoch, device):
                 #sent_test_result(model, inputs[batch_pos], mask[batch_pos], device)
             # No use Batch
             # else:
-            sent_validation_result(x * x_no_missing_mask.unsqueeze(1).unsqueeze(2), pred, y, connections, epoch)
-                #sent_test_result(model, inputs, mask, device)
+            valid_results_variables = {
+                'inputs': x * x_no_missing_mask.unsqueeze(1).unsqueeze(2),
+                'prediction': pred,
+                'sota': y,
+                'connections': connections,
+                'epoch': epoch
+            }
+            #sent_test_result(model, inputs, mask, device)
 
-    return loss_collector_acum
+    return loss_collector_acum, valid_results_variables
 
 def train(args):
 
@@ -463,7 +472,7 @@ def train(args):
         print("patinece:", patience_loss)
 
         train_loss_acum = train_epoch(keysecom_model, train_loader, criterion, optimizer, device)
-        val_loss_acum = eval_epoch(keysecom_model, val_loader, criterion_validation, epoch, device)
+        val_loss_acum, valid_result_first_epoch = eval_epoch(keysecom_model, val_loader, criterion_validation, epoch, device)
         
         train_loss = np.mean(train_loss_acum)
         val_loss = np.mean(val_loss_acum)
@@ -471,13 +480,17 @@ def train(args):
         print("train loss:", train_loss)
         print("eval loss:", val_loss)
 
-        
-        
+        patience_loss += 1
         
         if val_loss < min_loss:
             min_loss = val_loss
             sent_histogram(loss_baseline_acum, val_loss_acum, loss_cubic_acum, val_set.dataset_name, epoch)  
-
+            sent_validation_result(valid_result_first_epoch['inputs'],
+                                   valid_result_first_epoch['prediction'],
+                                   valid_result_first_epoch['sota'],
+                                   valid_result_first_epoch['connections'],
+                                   valid_result_first_epoch['epoch'])
+            patience_loss = 0
             #best_model_state_dict = keysecom_model.state_dict()
         
         wandb.log({
@@ -486,6 +499,10 @@ def train(args):
             'epoch': epoch,
             'minimun_loss': min_loss,
         })
+        
+        if patience_loss >= args.patience:
+            print("Max patience set to ", args.patience)
+            break
         #keysecom_model.load_state_dict(best_model_state_dict)
         #optimizer = torch.optim.Adam(keysecom_model.parameters(), lr=lr_values[epoch])
         #scheduler.step()
@@ -501,8 +518,15 @@ if __name__ == '__main__':
                      name=args.experiment_name,
                      #mode="offline",
                      job_type="model-training",
-                     tags=TAG)
+                     tags=TAG,
+                     save_code=True)
 
+    run.notes = args.notes 
     config = wandb.config
-
+    
+    #files_list = ["3_train.py", "dataloader.py", "model.py", "parseMain.py"]
+    #for file in files_list:
+    #    wandb.run.log_code(f"./{file}")
+    wandb.run.log_code(".")
+    
     train(args)
