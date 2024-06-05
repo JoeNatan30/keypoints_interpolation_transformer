@@ -9,11 +9,12 @@ def get_default_args():
                         help="Seed with which to initialize all the random components of the training")
     parser.add_argument("--hidden_dim", type=int, default=256,
                         help="Hidden dimension of the underlying Transformer model")
-    parser.add_argument("--num_heads", type=int, default=16)
+    parser.add_argument("--num_heads", type=int, default=8)
     parser.add_argument("--num_layers", type=int, default=6)
     parser.add_argument("--weight_decay", type=int, default=0.0)
     parser.add_argument("--notes", type=str, default="")
     parser.add_argument("--patience", type=int, default=50)
+    parser.add_argument("--upload_model",type=str, default="olive-night-782.pth")
 
     # Data
     parser.add_argument("--training_set_path", type=str, default="", help="Path to the training dataset CSV file")

@@ -1,27 +1,27 @@
 
-from torchvision import transforms
+
 import argparse
-import torch
-from torch.utils.data import DataLoader
-from torch.nn import MSELoss
-from torch.optim import Adam, RMSprop
-from torch.optim.lr_scheduler import LambdaLR
+import os
+import parseMain
+
 #from spoter.gaussian_noise import GaussianNoise
 
-import matplotlib.pyplot as plt
-import os
+
+import numpy as np
+import pandas as pd
 import wandb
 import model
 import dataloader
-import augmentation
-
-from euclidean_loss import EuclideanLoss
+import torch
+from torch.utils.data import DataLoader
+from torch.nn import MSELoss
+from torch.optim import Adam
+from torch.optim.lr_scheduler import LambdaLR
+from torchvision import transforms
+import matplotlib.pyplot as plt
 from scipy.stats import f_oneway, ttest_ind, tukey_hsd
 
-import parseMain
-import numpy as np
-import pandas as pd
-
+from euclidean_loss import EuclideanLoss
 from utils import prepare_keypoints_image, get_edges_index
 
 
@@ -33,9 +33,7 @@ torch.manual_seed(42)
 CONFIG_FILENAME = "config.json"
 PROJECT_WANDB = "fill_missings_transformer"
 ENTITY = "joenatan30" #joenatan30
-TAG = ["paper"]
-
-#os.environ["WANDB_API_KEY"] = "c16c54799944a6127132bcb81b2fb9ebcb4fe5db"
+TAG = ["cycle"]
 
 connections = np.moveaxis(np.array(get_edges_index('54')), 0, 1)
 
@@ -51,7 +49,6 @@ def lr_lambda(current_step, lr, optim):
     #    lr_rate = (0.00005/current_step) ** 0.5  # Función de raíz cuadrada inversa
     lr_rate = lr[current_step]
 
-    
     for param_group in optim.param_groups:
         param_group['lr'] = lr_rate
 
@@ -84,54 +81,7 @@ def cubic_interpolation(data, mask):
     return interpolated_data.permute(2, 0, 1)
 
 def sent_histogram(loss_baseline_acum, loss_collector_acum, loss_cubic_acum, to_process, epoch, bins=24, figsize=(12, 8)):
-    """
-    Genera un histograma comparativo de las distribuciones de pérdida para el baseline, la IA y la interpolación cúbica.
 
-    :param loss_baseline_acum: Lista de pérdidas acumuladas para el baseline.
-    :param loss_collector_acum: Lista de pérdidas acumuladas para la IA.
-    :param loss_cubic_acum: Lista de pérdidas acumuladas para la interpolación cúbica.
-    :param to_process: Descripción del proceso para incluir en el nombre del archivo de guardado.
-    :param epoch: Época actual del entrenamiento.
-    :param bins: Número de bins para el histograma.
-    :param figsize: Tamaño de la figura.
-    """
-    
-    '''
-    # Definir paleta de colores y estilos de línea
-    colors = ['skyblue', 'orange', 'brown']
-    line_styles = ['dashed', 'dashed', 'dashed']
-    labels = ['Baseline', "IA", "Cubicspline"]
-
-    # Crear un histograma conjunto para comparar las distribuciones
-    plt.figure(figsize=figsize)
-
-    # Definir rangos de bins para ambos conjuntos de datos
-    bins = np.histogram_bin_edges(np.concatenate([loss_baseline_acum, loss_collector_acum, loss_cubic_acum]), bins=bins)
-    #bins = np.histogram_bin_edges(np.concatenate([loss_baseline_acum, loss_collector_acum, loss_cubic_acum]), bins='auto')
-    # Dibujar histogramas con bordes y colores específicos
-    for (loss, color, linestyle, label) in zip([loss_baseline_acum, loss_collector_acum, loss_cubic_acum], colors, line_styles, labels):
-        plt.hist(loss, bins=bins, alpha=0.7, label=f'Loss {label}', color=color, edgecolor='black', linestyle=linestyle)
-
-    # Agregar líneas verticales para resaltar la mediana
-    for i, loss in enumerate([loss_baseline_acum, loss_collector_acum, loss_cubic_acum]):
-        plt.axvline(x=np.median(loss), color=colors[i], linestyle='dashed', linewidth=3, label=f'Median Loss {i+1}')
-
-    # Agregar líneas de cuadrícula y cambiar el estilo de la cuadrícula
-    plt.grid(axis='y', linestyle='--', alpha=0.5)
-
-    # Cambiar el estilo de la leyenda para mayor claridad
-    plt.legend(loc='upper right', fontsize='small', bbox_to_anchor=(1.05, 1), borderaxespad=0.)
-
-    # Añadir un título al eje y para indicar que es la frecuencia acumulativa
-    plt.ylabel('Cumulative Frequency', fontsize=14)
-
-    # Mejorar la legibilidad y el diseño general
-    plt.title('Histogram of Loss - Cubic Interpolation', fontsize=18)
-    plt.xlabel('Loss', fontsize=14)
-    plt.ylabel('Frequency', fontsize=14)
-
-    plt.tight_layout()  # Ajustar el diseño automáticamente para evitar superposiciones
-    '''
     all_losses = [loss_baseline_acum, loss_collector_acum, loss_cubic_acum]
     medians = [np.median(loss) for loss in all_losses]
     labels = ['Baseline', 'AI', "Cubicspline"] 
@@ -188,14 +138,6 @@ def sent_histogram(loss_baseline_acum, loss_collector_acum, loss_cubic_acum, to_
     tukey_results = tukey_hsd(*all_losses)
     print(tukey_results)
 
-    # tukey_results = tukey_hsd(*all_losses, np.repeat(labels, len(loss_collector_acum)))
-    # for comparison, group_1_name, group_2_name, statistic, p_value, lower_ci, upper_ci in zip(tukey_results.groupsunique[comparison[0]], tukey_results.groupsunique[comparison[1]], tukey_results._results_table['meandiffs'], tukey_results._results_table['pvals'], tukey_results._results_table['lower'], tukey_results._results_table['upper']):
-        # print(f"{group_1_name} - {group_2_name}: Statistic={statistic:.3f}, p-value={p_value:.3f}, Lower CI={lower_ci:.3f}, Upper CI={upper_ci:.3f}")    #print(tukey_results)
-    #print(tukey_results)
-    # Realiza la prueba t de Student
-    #t_stat, p_value = ttest_ind(*all_losses)
-    #print(f"T-statistic: {t_stat}, p-value: {p_value}")
-
 def sent_test_result(model, inputs, mask, device):
 
     src_mask = model.get_src_mask(mask, len(inputs)).to(device)
@@ -230,44 +172,7 @@ def sent_validation_result(inputs, prediction, sota, connections, epoch):
     images = wandb.Image(output, caption="Validation")
     wandb.log({"examples_validation epoch": images}, step=epoch)
 
-
-    ## TEST
-    '''
-    # send Test
-    _, Kp_size, coord_size = inputs.shape
-
-    #          Y_recursive starts as <SOS>
-    y_recursive = torch.ones(1, inputs.shape[1], inputs.shape[2]).to(device) # SOS
-    #          We save the first (empty) frame
-    test_images = prepare_keypoints_image(y_recursive[0], connections, -1, "Test")
-
-    eos = torch.zeros(1, Kp_size, coord_size-1).to(device)  # tensor de mitad ceros y mitad unos
-    eos = torch.cat((eos,y_recursive[:,:,-1:].clone()), dim=2)
-    
-    for _rel_pos in range(1, len(inputs)+5):
-
-        src_mask = model.get_src_mask(len(y_recursive)).to(device)
-
-        pred = model(inputs, y_recursive, src_mask=src_mask)
-
-        #append keypoints
-        if len(pred) == 1:
-            y_recursive = torch.cat((y_recursive, pred), dim=0)
-        else:
-            y_recursive = torch.cat((y_recursive, pred[-1:]), dim=0)
-
-        #append image
-        test_images = np.concatenate((test_images, prepare_keypoints_image(y_recursive[_rel_pos], connections, _rel_pos-1)), axis=1)
-
-        next_item_check = pred == eos
-        if next_item_check.all():
-            break
-
-    images = wandb.Image(test_images, caption="Test Output")
-    wandb.log({"examples of test": images})
-    '''
-
-def train_epoch(model, dataloader, criterion, optimizer, device):
+def train_epoch(model, first_model, dataloader, criterion, optimizer, device):
 
     model.train()
     loss_collector_acum = []
@@ -288,24 +193,21 @@ def train_epoch(model, dataloader, criterion, optimizer, device):
         x_no_missing_mask = 1 - x_mask
         y_no_missing_mask = 1 - y_mask
         
-        #if mask!=None:
-        #    mask = mask.squeeze(0).to(device).float()
+        src_mask = first_model.get_mask(x_mask, x.shape[0], "all").to(device)
+        tgt_mask = first_model.get_mask(y_mask, y.shape[0], "all").to(device)
 
-        # Use Batch
-        #if len(inputs.shape) != 3: # is 4 if you are using batch
-            # src_mask = model.get_src_mask(mask[:,:-1], inputs[:-1,:,:].shape[1]).to(device)
-            # pred = model(inputs[:-1,:,:], sota, coder_mask=mask, src_mask=src_mask) 
-            # loss = criterion(pred, sota)
-        # No use Batch
+        src_mask_first = first_model.get_mask(x_mask, x.shape[0], "repeat-inc").to(device)
+        tgt_mask_first = first_model.get_mask(y_mask, y.shape[0], "repeat-inc").to(device)
 
-        # else:
+        pred = first_model(x, x_no_sota,
+                           src_pad_mask=x_mask.unsqueeze(0),
+                           tgt_pad_mask=y_mask.unsqueeze(0),
+                           src_mask=src_mask_first,
+                           tgt_mask=tgt_mask_first)
 
-        src_mask = model.get_mask(x_mask, x.shape[0], "repeat-inc").to(device)
-        tgt_mask = model.get_mask(y_mask, y.shape[0], "repeat-inc").to(device)
-
-        pred = model(x, x_no_sota,
-                     src_pad_mask=x_mask.unsqueeze(0),
-                     tgt_pad_mask=y_mask.unsqueeze(0),
+        pred = model(x_no_sota, pred,
+                     src_pad_mask=torch.ones_like(x_mask.unsqueeze(0)),
+                     tgt_pad_mask=torch.ones_like(y_mask.unsqueeze(0)),
                      src_mask=src_mask,
                      tgt_mask=tgt_mask)
 
@@ -322,7 +224,7 @@ def train_epoch(model, dataloader, criterion, optimizer, device):
 
     return loss_collector_acum
 
-def eval_epoch(model, dataloader, criterion, epoch, device):
+def eval_epoch(model, first_model, dataloader, criterion, epoch, device):
 
     model.eval()
     #running_loss = 0.0
@@ -345,26 +247,23 @@ def eval_epoch(model, dataloader, criterion, epoch, device):
         
         x_no_missing_mask = 1 - x_mask
         y_no_missing_mask = 1 - y_mask
-        
-        #print("mask:",mask.shape)
-        #if mask!=None:
-        #    mask = mask.squeeze(0).to(device).float()
-        
-        # Use Batch
-        #if len(inputs.shape) != 3: # is 4 if you are using batch
-        #    src_mask = model.get_src_mask(inputs.shape[1]).to(device)
-        #    pred = model(inputs, sota[:,:-1,:,:], coder_mask=mask, src_mask=src_mask)
-        #    loss = criterion(pred, sota[:,1:,:,:])
-        # No use Batch
-        #else:
 
-        src_mask = model.get_mask(x_mask, x.shape[0], "repeat-inc").to(device)
-        tgt_mask = model.get_mask(y_mask, y.shape[0], "repeat-inc").to(device)
+        src_mask = first_model.get_mask(x_mask, x.shape[0], "all").to(device)
+        tgt_mask = first_model.get_mask(y_mask, y.shape[0], "all").to(device)
 
-        pred = model(x, x_no_sota,
-                     src_pad_mask=x_mask.unsqueeze(0),
-                     tgt_pad_mask=y_mask.unsqueeze(0),
-                     src_mask=src_mask, 
+        src_mask_first = first_model.get_mask(x_mask, x.shape[0], "repeat-inc").to(device)
+        tgt_mask_first = first_model.get_mask(y_mask, y.shape[0], "repeat-inc").to(device)
+
+        pred = first_model(x, x_no_sota,
+                           src_pad_mask=x_mask.unsqueeze(0),
+                           tgt_pad_mask=y_mask.unsqueeze(0),
+                           src_mask=src_mask_first,
+                           tgt_mask=tgt_mask_first)
+
+        pred = model(x_no_sota, pred,
+                     src_pad_mask=torch.ones_like(x_mask.unsqueeze(0)),
+                     tgt_pad_mask=torch.ones_like(y_mask.unsqueeze(0)),
+                     src_mask=src_mask,
                      tgt_mask=tgt_mask)
                         
         pred = pred * y_mask.unsqueeze(1).unsqueeze(2) + y * y_no_missing_mask.unsqueeze(1).unsqueeze(2)
@@ -380,18 +279,8 @@ def eval_epoch(model, dataloader, criterion, epoch, device):
             cubic_loss = criterion(cubic, y.clone().detach().cpu())
             loss_cubic_acum.append(cubic_loss)
 
-        #loss = loss.float()    
-        #running_loss += loss
-
-        # Print in WandB
         if i == 1:
-            # Use Batch
-            # if len(inputs.shape) != 3:
-            #     batch_pos = 1
-            #     sent_validation_result(inputs[batch_pos] * no_missing_mask, pred[batch_pos], sota[batch_pos,:,:,:], connections, epoch)
-                #sent_test_result(model, inputs[batch_pos], mask[batch_pos], device)
-            # No use Batch
-            # else:
+ 
             valid_results_variables = {
                 'inputs': x * x_no_missing_mask.unsqueeze(1).unsqueeze(2),
                 'prediction': pred,
@@ -399,7 +288,6 @@ def eval_epoch(model, dataloader, criterion, epoch, device):
                 'connections': connections,
                 'epoch': epoch
             }
-            #sent_test_result(model, inputs, mask, device)
 
     return loss_collector_acum, valid_results_variables
 
@@ -412,7 +300,6 @@ def train(args):
     g = torch.Generator()
     g.manual_seed(42)
 
-    #transform = transforms.Compose([GaussianNoise(args.gaussian_mean, args.gaussian_std)])
     train_set = dataloader.LSP_Dataset(args.training_set_path,
                                        have_aumentation=True,
                                        is_train=True,
@@ -429,18 +316,35 @@ def train(args):
 
     train_loader = DataLoader(train_set, shuffle=True, batch_size=1,  generator=g)
     val_loader = DataLoader(val_set, shuffle=False, batch_size=1,  generator=g)
+
+
+    checkpoint = torch.load(f'model_checkpoint/{args.upload_model}')
     
-    keysecom_model = model.KeypointCompleter(input_size=54*2, 
+    keysecom_model = model.KeypointCompleter(input_size=checkpoint['input_size'], 
+                                             hidden_dim=checkpoint['hidden_dim'], 
+                                             num_layers=checkpoint['num_layers'],
+                                             num_heads=checkpoint['num_heads'])
+
+    
+    keysecom_model_cycle = model.KeypointCompleterCycle(input_size=54*2, 
                                              hidden_dim=args.hidden_dim, 
                                              num_layers=args.num_layers,
                                              num_heads=args.num_heads)
-    wandb.watch(keysecom_model)
+    wandb.watch(keysecom_model_cycle)
+    model_path = f'./model_checkpoint/{wandb.run.name}.pth'
+
     criterion = MSELoss()#EuclideanLoss()#MSELoss()
     criterion_validation = EuclideanLoss()
-    optimizer = Adam(keysecom_model.parameters(), lr=args.lr)
-    # optimizer = RMSprop(keysecom_model.parameters(), lr=args.lr)
-    keysecom_model.train(True)
+    optimizer = Adam(keysecom_model_cycle.parameters(), lr=args.lr)
+    # optimizer = RMSprop(keysecom_model_cycle.parameters(), lr=args.lr)
+
+    keysecom_model.load_state_dict(checkpoint['model_state_dict'])
+
+    keysecom_model.train(False)
     keysecom_model.to(device)
+
+    keysecom_model_cycle.train(True)
+    keysecom_model_cycle.to(device)
 
     best_model_state_dict = None
     epoch_start = 0
@@ -457,22 +361,13 @@ def train(args):
     # TRAINING AND EVALUATION
     for epoch in range(epoch_start, args.epochs):
         print(f'|=> Epoch: [{epoch}], Lr_rate: {optimizer.param_groups[0]["lr"]}')
-        '''
-        if patience_loss >= 10:
-            args.lr = args.lr/10
-            patience_loss = 0
-            
-            # Cargar el modelo con el menor loss hasta ese momento
-            if best_model_state_dict is not None:
-                keysecom_model.load_state_dict(best_model_state_dict)
-                optimizer = torch.optim.Adam(keysecom_model.parameters(), lr=args.lr)
-        '''
+
         optimizer = lr_lambda(epoch, lr_values, optimizer)
         
         print("patinece:", patience_loss)
 
-        train_loss_acum = train_epoch(keysecom_model, train_loader, criterion, optimizer, device)
-        val_loss_acum, valid_result_first_epoch = eval_epoch(keysecom_model, val_loader, criterion_validation, epoch, device)
+        train_loss_acum = train_epoch(keysecom_model_cycle, keysecom_model, train_loader, criterion, optimizer, device)
+        val_loss_acum, valid_result_first_epoch = eval_epoch(keysecom_model_cycle, keysecom_model, val_loader, criterion_validation, epoch, device)
         
         train_loss = np.mean(train_loss_acum)
         val_loss = np.mean(val_loss_acum)
@@ -491,7 +386,22 @@ def train(args):
                                    valid_result_first_epoch['connections'],
                                    valid_result_first_epoch['epoch'])
             patience_loss = 0
-            #best_model_state_dict = keysecom_model.state_dict()
+            #best_model_state_dict = keysecom_model_cycle.state_dict()
+            
+            torch.save({
+                'model_state_dict': keysecom_model_cycle.state_dict(),
+                'optimizer_state_dict': optimizer.state_dict(),
+                'input_size':54*2, 
+                'hidden_dim':args.hidden_dim, 
+                'num_layers':args.num_layers,
+                'num_heads':args.num_heads,
+                'loss': min_loss  
+            }, model_path)
+           
+            artifact = wandb.Artifact(name=f'model_{wandb.run.name}', type='model')
+            artifact.add_file(model_path)
+
+            wandb.log_artifact(artifact)
         
         wandb.log({
             'train_loss': train_loss,
@@ -502,9 +412,10 @@ def train(args):
         
         if patience_loss >= args.patience:
             print("Max patience set to ", args.patience)
+
             break
-        #keysecom_model.load_state_dict(best_model_state_dict)
-        #optimizer = torch.optim.Adam(keysecom_model.parameters(), lr=lr_values[epoch])
+        #keysecom_model_cycle.load_state_dict(best_model_state_dict)
+        #optimizer = torch.optim.Adam(keysecom_model_cycle.parameters(), lr=lr_values[epoch])
         #scheduler.step()
         # losses.append(train_loss.item())
 
@@ -523,10 +434,7 @@ if __name__ == '__main__':
 
     run.notes = args.notes 
     config = wandb.config
-    
-    #files_list = ["3_train.py", "dataloader.py", "model.py", "parseMain.py"]
-    #for file in files_list:
-    #    wandb.run.log_code(f"./{file}")
+
     wandb.run.log_code(".")
     
     train(args)

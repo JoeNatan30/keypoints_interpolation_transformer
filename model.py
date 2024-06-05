@@ -1,76 +1,25 @@
-'''
-import copy
-import torch
-
-import torch.nn as nn
-from typing import Optional
-
-
-def _get_clones(mod, n):
-    return nn.ModuleList([copy.deepcopy(mod) for _ in range(n)])
-
-
-class SPOTERTransformerDecoderLayer(nn.TransformerDecoderLayer):
-    """
-    Edited TransformerDecoderLayer implementation omitting the redundant self-attention operation as opposed to the
-    standard implementation.
-    """
-
-    def __init__(self, d_model, nhead, dim_feedforward, dropout, activation):
-        super(SPOTERTransformerDecoderLayer, self).__init__(d_model, nhead, dim_feedforward, dropout, activation)
-
-        del self.self_attn
-
-    def forward(self, tgt: torch.Tensor, memory: torch.Tensor, src_mask: Optional[torch.Tensor] = None,
-                memory_mask: Optional[torch.Tensor] = None, tgt_key_padding_mask: Optional[torch.Tensor] = None,
-                memory_key_padding_mask: Optional[torch.Tensor] = None) -> torch.Tensor:
-
-        tgt = tgt + self.dropout1(tgt)
-        tgt = self.norm1(tgt)
-        tgt2 = self.multihead_attn(tgt, memory, memory, attn_mask=memory_mask,
-                                   key_padding_mask=memory_key_padding_mask)[0]
-        tgt = tgt + self.dropout2(tgt2)
-        tgt = self.norm2(tgt)
-        #tgt2 = self.linear2(self.dropout(self.activation(self.linear1(tgt))))
-        #tgt = tgt + self.dropout3(tgt2)
-        #tgt = self.norm3(tgt)
-
-        return tgt
-
-
-class KeypointCompleter(nn.Module):
-    """
-    Implementation of the SPOTER (Sign POse-based TransformER) architecture for sign language recognition from sequence
-    of skeletal data.
-    """
-    def __init__(self, input_size, num_layers, hidden_dim=55):
-        super().__init__()
-
-        self.row_embed = nn.Parameter(torch.rand(50, hidden_dim))
-        self.pos = nn.Parameter(torch.cat([self.row_embed[0].unsqueeze(0).repeat(1, 1, 1)], dim=-1).flatten(0, 1).unsqueeze(0))
-        self.class_query = nn.Parameter(torch.rand(1, hidden_dim))
-        self.transformer = nn.Transformer(hidden_dim, 9, num_layers, num_layers)
-        self.linear_class = nn.Linear(hidden_dim, input_size)
-
-        # Deactivate the initial attention decoder mechanism
-        custom_decoder_layer = SPOTERTransformerDecoderLayer(self.transformer.d_model, self.transformer.nhead, 2048,
-                                                             0.1, "relu")
-        self.transformer.decoder.layers = _get_clones(custom_decoder_layer, self.transformer.decoder.num_layers)
-
-    def forward(self, inputs):
-        h = torch.unsqueeze(inputs.flatten(start_dim=1), 1).float()
-        h = self.transformer(self.pos + h, self.class_query.unsqueeze(0)).transpose(0, 1)
-        print(h.shape, "<-----")
-        res = self.linear_class(h)
-
-        return res
-'''
-
 import math
 import torch
 import torch.nn as nn
 import torch.optim as optim
 import torch.nn.functional as F
+
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+
+class SwiGLU(nn.Module):
+    def __init__(self, input_dim, hidden_dim):
+        super(SwiGLU, self).__init__()
+        self.fc1 = nn.Linear(input_dim, hidden_dim)
+        self.fc2 = nn.Linear(input_dim, hidden_dim)
+        self.fc3 = nn.Linear(hidden_dim, input_dim)
+
+    def forward(self, x):
+        x1 = self.fc1(x)
+        x2 = self.fc2(x)
+        swish = x1 * torch.sigmoid(x2)
+        return self.fc3(swish)
 
 class PositionalEncoding(nn.Module):
     def __init__(self, dim_model, dropout_p, max_len):
@@ -128,6 +77,9 @@ class KeypointCompleter(nn.Module):
         self.learned_input_positional_encoder = nn.Parameter(torch.rand(1, 1, hidden_dim))
         self.learned_filled_positional_encoder = nn.Parameter(torch.rand(1, 1, hidden_dim))
 
+        self.swiGlu_input_prev = SwiGLU(hidden_dim, hidden_dim)
+        self.swiGlu_filled_prev = SwiGLU(hidden_dim, hidden_dim)
+
         # TRANSFORMER
         self.transformer = nn.Transformer(
                             d_model=hidden_dim, 
@@ -136,6 +88,8 @@ class KeypointCompleter(nn.Module):
                             dropout=0.0,
                             num_encoder_layers=num_layers, 
                             num_decoder_layers=num_layers)
+        
+        self.swiGlu_decoded = SwiGLU(hidden_dim, hidden_dim)
         
         # NORM 2
         self.norm2 = nn.InstanceNorm1d(hidden_dim)
@@ -179,16 +133,22 @@ class KeypointCompleter(nn.Module):
         #input_pos = input_pos_trig + self.learned_input_positional_encoder
         #filled_pos = filled_pos_trig + self.learned_filled_positional_encoder
 
+        input_glu = self.swiGlu_input_prev(input_pos)
+        filled_glu = self.swiGlu_filled_prev(filled_pos)
+
         # TRANSFORMER
-        decoded = self.transformer(input_pos, filled_pos, 
+        decoded = self.transformer(input_glu, filled_glu, 
                              src_key_padding_mask=src_pad_mask, 
                              tgt_key_padding_mask=None, 
                              src_mask=src_mask,
                              tgt_mask=tgt_mask)
         
+        decoded = self.swiGlu_decoded(decoded)
         # CONCATENATE input_emb and filled_emb
         #decoded = self.norm2(decoded + filled_seq.transpose(0, 1))
         decoded = self.norm2(decoded + filled_emb)
+
+        decoded = decoded * torch.sigmoid(decoded)
         
         # FINAL LAYER (LINEAR)
         decoded = self.fc_final(decoded.transpose(0, 1))
@@ -245,3 +205,115 @@ class KeypointCompleter(nn.Module):
             assert "Choose a correct matrixType - model.py"
         
         return matrix_mask
+    
+
+class KeypointCompleterCycle(nn.Module):
+    def __init__(self, input_size, hidden_dim, num_layers, num_heads):
+        super(KeypointCompleterCycle, self).__init__()
+
+        # EMBEDDING
+        self.input_embedding = nn.Linear(108, hidden_dim)
+        self.filled_embedding = nn.Linear(108, hidden_dim)
+        
+        # NORM 1
+        self.input_norm1 = nn.InstanceNorm1d(hidden_dim)
+        self.filled_norm1 = nn.InstanceNorm1d(hidden_dim)
+        
+        # POSITION ENCODING
+        
+        self.trig_input_positional_encoder = PositionalEncoding(dim_model=hidden_dim, dropout_p=0.0, max_len=512)
+        self.trig_filled_positional_encoder = PositionalEncoding(dim_model=hidden_dim, dropout_p=0.0, max_len=512)
+        
+        self.learned_input_positional_encoder = nn.Parameter(torch.rand(1, 1, hidden_dim))
+        self.learned_filled_positional_encoder = nn.Parameter(torch.rand(1, 1, hidden_dim))
+
+        self.swiGlu_input_prev = SwiGLU(hidden_dim, hidden_dim)
+        self.swiGlu_filled_prev = SwiGLU(hidden_dim, hidden_dim)
+
+        # TRANSFORMER
+        self.transformer = nn.Transformer(
+                            d_model=hidden_dim, 
+                            nhead=num_heads,
+                            activation="gelu",
+                            dropout=0.0,
+                            num_encoder_layers=num_layers, 
+                            num_decoder_layers=num_layers)
+        
+        self.swiGlu_decoded = SwiGLU(hidden_dim, hidden_dim)
+        
+        # NORM 2
+        self.norm2 = nn.InstanceNorm1d(hidden_dim)
+        
+        # FINAL LAYER (LINEAR)
+        self.fc_final = nn.Linear(hidden_dim, input_size)
+
+    def forward(self, inputs, filled=None, src_pad_mask=None, tgt_pad_mask=None, src_mask=None, tgt_mask=None):
+
+        # Use Batch
+        if len(inputs.shape) != 3:
+            input_seq = inputs.flatten(start_dim=2).float()
+            input_seq = torch.permute(input_seq, (1, 0, 2))
+            filled_seq = filled.flatten(start_dim=2).float()
+            filled_seq = torch.permute(filled_seq, (1, 0, 2))
+            if src_mask != None:
+                src_mask = torch.permute(src_mask, (1, 0, 2))
+                src_mask = src_mask.squeeze(0)
+            if tgt_mask != None:
+                tgt_mask = torch.permute(tgt_mask, (1, 0, 2))
+                tgt_mask = tgt_mask.squeeze(0)
+        # Not use batch
+        else:
+            input_seq = torch.unsqueeze(inputs.flatten(start_dim=1), 1).float()
+            filled_seq = torch.unsqueeze(filled.flatten(start_dim=1), 1).float()
+
+        # EMBEDDING
+        input_emb = self.input_embedding(input_seq)
+        filled_emb = self.filled_embedding(filled_seq)
+        
+        # NORM 1
+        input_norm = self.input_norm1(input_emb)
+        filled_norm = self.filled_norm1(filled_emb)
+        
+        # POSITION ENCODING
+        input_pos_trig = self.trig_input_positional_encoder(input_norm)
+        filled_pos_trig = self.trig_filled_positional_encoder(filled_norm)
+        
+        input_pos = input_norm + input_pos_trig + self.learned_input_positional_encoder
+        filled_pos = filled_norm + filled_pos_trig + self.learned_filled_positional_encoder
+        #input_pos = input_pos_trig + self.learned_input_positional_encoder
+        #filled_pos = filled_pos_trig + self.learned_filled_positional_encoder
+
+        input_glu = self.swiGlu_input_prev(input_pos)
+        filled_glu = self.swiGlu_filled_prev(filled_pos)
+
+        # TRANSFORMER
+        decoded = self.transformer(input_glu, filled_glu, 
+                             src_key_padding_mask=src_pad_mask, 
+                             tgt_key_padding_mask=tgt_pad_mask, 
+                             src_mask=src_mask,
+                             tgt_mask=tgt_mask)
+        
+        decoded = self.swiGlu_decoded(decoded)
+        # CONCATENATE input_emb and filled_emb
+        #decoded = self.norm2(decoded + filled_seq.transpose(0, 1))
+        decoded = self.norm2(decoded + filled_emb)
+
+        decoded = decoded * torch.sigmoid(decoded)
+        
+        # FINAL LAYER (LINEAR)
+        decoded = self.fc_final(decoded.transpose(0, 1))
+        
+        #decoded = decoded + filled_seq.transpose(0, 1)
+        
+        # Use Batch
+        if len(inputs.shape) != 3:
+            decoded = decoded.unsqueeze(2) # torch.Size([N, S, E]) ->  torch.Size([N, S, 1, E])
+            decoded = decoded.permute(0, 1, 3, 2) # | ->  torch.Size([N, S, E, 1])
+            decoded = decoded.view(decoded.shape[0],-1, 54, 2) # | ->  torch.Size([N, S, E/D, D])
+        else:
+            decoded = decoded.squeeze(0).unsqueeze(1) # torch.Size([1, S, E]) -> torch.Size([S, 1, E])
+            decoded = decoded.permute(0, 2, 1) # | -> torch.Size([S, E, 1])
+            decoded = decoded.view(-1, 54, 2) # | -> torch.Size([S, E/D, D])
+        #decoded = self.fc(h)
+
+        return decoded

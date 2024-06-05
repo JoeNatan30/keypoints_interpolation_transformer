@@ -1,0 +1,4 @@
+mkdir data
+mkdir results
+mkdir model_checkpoint
+mkdir optimizer_state
