@@ -62,8 +62,8 @@ class KeypointCompleter(nn.Module):
         super(KeypointCompleter, self).__init__()
 
         # EMBEDDING
-        self.input_embedding = nn.Linear(108, hidden_dim)
-        self.filled_embedding = nn.Linear(108, hidden_dim)
+        self.input_embedding = nn.Linear(input_size, hidden_dim)
+        self.filled_embedding = nn.Linear(input_size, hidden_dim)
         
         # NORM 1
         self.input_norm1 = nn.InstanceNorm1d(hidden_dim)
@@ -212,8 +212,8 @@ class KeypointCompleterCycle(nn.Module):
         super(KeypointCompleterCycle, self).__init__()
 
         # EMBEDDING
-        self.input_embedding = nn.Linear(108, hidden_dim)
-        self.filled_embedding = nn.Linear(108, hidden_dim)
+        self.input_embedding = nn.Linear(input_size, hidden_dim)
+        self.filled_embedding = nn.Linear(input_size, hidden_dim)
         
         # NORM 1
         self.input_norm1 = nn.InstanceNorm1d(hidden_dim)
@@ -315,5 +315,24 @@ class KeypointCompleterCycle(nn.Module):
             decoded = decoded.permute(0, 2, 1) # | -> torch.Size([S, E, 1])
             decoded = decoded.view(-1, 54, 2) # | -> torch.Size([S, E/D, D])
         #decoded = self.fc(h)
+
+        return decoded
+    
+
+class Embedding(nn.Module):
+    def __init__(self, input_size, hidden_dim):
+        super(Embedding, self).__init__()
+        self.input_embedding = nn.Linear(input_size, hidden_dim)
+        self.output_embedding = nn.Linear(hidden_dim, input_size)
+
+    def forward(self, x):
+        
+        x = torch.unsqueeze(x.flatten(start_dim=1), 1).float()
+
+        encoded = self.input_embedding(x)
+        decoded = self.output_embedding(encoded)
+
+        decoded = decoded.permute(0, 2, 1)
+        decoded = decoded.view(-1, 54, 2)
 
         return decoded
