@@ -184,6 +184,7 @@ class KeypointCompleter(nn.Module):
             #  [0.,   0.,   0., -inf, -inf],
             #  [0.,   0.,   0.,   0., -inf],
             #  [0.,   0.,   0.,   0.,   0.]]
+
         elif matrixType == "repeat":
             matrix_mask = mask.clone().repeat(1, size, 1)
             matrix_mask = matrix_mask.squeeze()
