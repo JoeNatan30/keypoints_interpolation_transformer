@@ -14,7 +14,7 @@ def get_default_args():
     parser.add_argument("--weight_decay", type=int, default=0.0)
     parser.add_argument("--notes", type=str, default="")
     parser.add_argument("--patience", type=int, default=50)
-    parser.add_argument("--lr", type=float, default=0.0000005, help="Learning rate for the model training")
+    parser.add_argument("--lr", type=float, default=0.000005, help="Learning rate for the model training")
     parser.add_argument("--upload_model", action='store_true')
     parser.add_argument("--upload_embedding_model", action='store_true')
     parser.add_argument("--upload_general_model", action='store_true')

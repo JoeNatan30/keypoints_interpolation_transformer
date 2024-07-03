@@ -71,8 +71,8 @@ class KeypointCompleter(nn.Module):
         
         # POSITION ENCODING
         
-        self.trig_input_positional_encoder = PositionalEncoding(dim_model=hidden_dim, dropout_p=0.0, max_len=512)
-        self.trig_filled_positional_encoder = PositionalEncoding(dim_model=hidden_dim, dropout_p=0.0, max_len=512)
+        self.trig_input_positional_encoder = PositionalEncoding(dim_model=hidden_dim, dropout_p=0.0, max_len=512*4)
+        self.trig_filled_positional_encoder = PositionalEncoding(dim_model=hidden_dim, dropout_p=0.0, max_len=512*4)
         
         self.learned_input_positional_encoder = nn.Parameter(torch.rand(1, 1, hidden_dim))
         self.learned_filled_positional_encoder = nn.Parameter(torch.rand(1, 1, hidden_dim))
@@ -128,8 +128,8 @@ class KeypointCompleter(nn.Module):
         input_pos_trig = self.trig_input_positional_encoder(input_norm)
         filled_pos_trig = self.trig_filled_positional_encoder(filled_norm)
         
-        input_pos = input_norm + input_pos_trig + self.learned_input_positional_encoder
-        filled_pos = filled_norm + filled_pos_trig + self.learned_filled_positional_encoder
+        input_pos = input_pos_trig + self.learned_input_positional_encoder
+        filled_pos = filled_pos_trig + self.learned_filled_positional_encoder
         #input_pos = input_pos_trig + self.learned_input_positional_encoder
         #filled_pos = filled_pos_trig + self.learned_filled_positional_encoder
 
@@ -137,6 +137,7 @@ class KeypointCompleter(nn.Module):
         filled_glu = self.swiGlu_filled_prev(filled_pos)
 
         # TRANSFORMER
+
         decoded = self.transformer(input_glu, filled_glu, 
                              src_key_padding_mask=src_pad_mask, 
                              tgt_key_padding_mask=None, 

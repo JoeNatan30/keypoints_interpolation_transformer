@@ -32,9 +32,9 @@ ENTITY = "joenatan30" #joenatan30
 TAG = ["trained_embedding"]
 
 EMBEDDING_MODEL_NAME = "embedding_256_ethereal-hill-40"
-GENERAL_MODEL_NAME = "vivid-hill-800"#"dashing-star-794"#"polished-sky-789"
+GENERAL_MODEL_NAME = "devoted-shadow-804"#"vivid-hill-800""dashing-star-794"#"polished-sky-789"
 
-#os.environ["WANDB_API_KEY"] = "c16c54799944a6127132bcb81b2fb9ebcb4fe5db"
+#os.environ["WANDB_API_KEY"] = ""
 
 connections = np.moveaxis(np.array(get_edges_index('54')), 0, 1)
 
