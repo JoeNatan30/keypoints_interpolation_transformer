@@ -26,7 +26,7 @@ def resize_dataset(dataset, value):
     dataset[-1] = value
  
 
-def main():
+def Generate_intermediate_h5():
 
     to_process = "PUCP_PSL_DGI305" #AEC #PUCP_PSL_DGI305 #AUTSL
     dataset_info = load_configuration("dataset_config")
@@ -77,7 +77,7 @@ def main():
 
     validation_h5_file.close()
 
-def read_h5_intermediate():
+def read_intermediate_h5():
 
     to_process = "PUCP_PSL_DGI305"
 
@@ -105,5 +105,5 @@ def read_h5_intermediate():
         print(x[idx].shape, y[idx].shape, x_mask[idx].shape, y_mask[idx].shape)
 
    
-# main()
-read_h5_intermediate()
+# Generate_intermediate_h5()
+read_intermediate_h5()
